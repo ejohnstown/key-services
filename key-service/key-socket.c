@@ -255,7 +255,7 @@ int KeySocket_Relisten(KS_SOCKET_T sockFd, KS_SOCKET_T listenFd,
 #else
     (void)sockFd;
     (void)listenFd;
-    (void)srcPort;
+    (void)srvPort;
 #endif
 
     return ret;
@@ -523,13 +523,11 @@ int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
 
 void KeySocket_Unlisten(const unsigned short srvPort)
 {
-    if (sockfd != KS_SOCKET_T_INIT) {
 #ifdef HAVE_NETX
-        nx_tcp_server_socket_unlisten(nxIp, srvPort);
+    nx_tcp_server_socket_unlisten(nxIp, srvPort);
 #else
 
 #endif
-    }
 }
 
 void KeySocket_Unbind(KS_SOCKET_T sockfd)
