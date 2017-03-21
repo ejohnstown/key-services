@@ -95,6 +95,7 @@ typedef struct KeySockIoCallback {
 
 /* Key-Socket API's */
 int  KeySocket_Init(void);
+int  KeySocket_SetSockOpt(KS_SOCKET_T sockFd, int type, int so, const void* opt, size_t opt_sz);
 int  KeySocket_CreateTcpSocket(KS_SOCKET_T* pSockfd);
 int  KeySocket_CreateUdpSocket(KS_SOCKET_T* pSockfd);
 int  KeySocket_SetIpMembership(KS_SOCKET_T sockFd, const struct in_addr* multiaddr, const struct in_addr* ifcaddr);

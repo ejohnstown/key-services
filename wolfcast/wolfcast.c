@@ -58,8 +58,13 @@
 
     #define GROUP_ADDR "226.0.0.3"
     #define GROUP_PORT 12345
-    #define KEY_ADDR "192.168.2.1"
 
+    #ifndef LOCAL_ADDR
+        #define LOCAL_ADDR "192.168.0.111"
+    #endif
+    #ifndef KEY_ADDR
+        #define KEY_ADDR   "192.168.0.111"
+    #endif
 
     static struct in_addr keySrvAddr;
 
@@ -112,7 +117,11 @@ CreateSockets(SocketInfo_t* si, int isClient)
         struct in_addr addr;
 
         memset(&addr, 0, sizeof(addr));
-        addr.s_addr = inet_addr("192.168.2.1");
+#ifndef LOCAL_ADDR
+        addr.s_addr = htonl(INADDR_ANY);
+#else
+        addr.s_addr = inet_addr(LOCAL_ADDR);
+#endif
 
         if (setsockopt(si->txFd, IPPROTO_IP, IP_MULTICAST_IF,
                     (const void*)&addr, sizeof(addr)) != 0) {
@@ -178,11 +187,11 @@ CreateSockets(SocketInfo_t* si, int isClient)
         memset(&imreq, 0, sizeof(imreq));
 
         imreq.imr_multiaddr.s_addr = inet_addr(GROUP_ADDR);
-#if 0
+#ifndef LOCAL_ADDR
         /* Non-generic solution to a local problem. */
         imreq.imr_interface.s_addr = htonl(INADDR_ANY);
 #else
-        imreq.imr_interface.s_addr = inet_addr("192.168.2.1");
+        imreq.imr_interface.s_addr = inet_addr(LOCAL_ADDR);
 #endif
 
         if (setsockopt(si->rxFd, IPPROTO_IP, IP_ADD_MEMBERSHIP,

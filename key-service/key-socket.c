@@ -27,6 +27,18 @@ int KeySocket_Init(void)
     return 0;
 }
 
+int KeySocket_SetSockOpt(KS_SOCKET_T sockFd, int type, int so,
+    const void* opt, size_t opt_sz)
+{
+    int ret = setsockopt(sockFd, type, so, opt, opt_sz);
+    if (ret < 0) {
+    #if KEY_SOCKET_LOGGING_LEVEL >= 1
+        printf("setsockopt %d %d failed\n", type, so);
+    #endif
+    }
+    return ret;
+}
+
 int KeySocket_CreateTcpSocket(KS_SOCKET_T* pSockfd)
 {
     int ret = 0;
@@ -43,7 +55,7 @@ int KeySocket_CreateTcpSocket(KS_SOCKET_T* pSockfd)
         return -1;
     }
 
-    setsockopt(*pSockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    KeySocket_SetSockOpt(*pSockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #endif
     return ret;
 }
@@ -63,11 +75,11 @@ int KeySocket_CreateUdpSocket(KS_SOCKET_T* pSockfd)
         return -1;
     }
 
-    setsockopt(*pSockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    KeySocket_SetSockOpt(*pSockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #ifdef SO_REUSEPORT
-    setsockopt(*pSockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+    KeySocket_SetSockOpt(*pSockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
 #endif
-#endif
+#endif /* HAVE_NETX */
 
     return ret;
 }
@@ -94,14 +106,9 @@ int KeySocket_SetIpMembership(KS_SOCKET_T sockFd,
     memset(&imreq, 0, sizeof(imreq));
     imreq.imr_multiaddr.s_addr = multiaddr->s_addr;
     imreq.imr_interface.s_addr = ifcaddr->s_addr;
-    ret = setsockopt(sockFd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+    ret = KeySocket_SetSockOpt(sockFd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                      (const void*)&imreq, sizeof(imreq));
-    if (ret < 0) {
-#if KEY_SOCKET_LOGGING_LEVEL >= 1
-        perror("setsockopt mc add membership failed");
-#endif
-    }
-#endif
+#endif /* HAVE_NETX */
 
     return ret;
 }

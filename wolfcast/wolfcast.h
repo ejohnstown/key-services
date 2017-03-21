@@ -1,3 +1,6 @@
+#ifndef _WOLFCAST_H_
+#define _WOLFCAST_H_
+
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 
@@ -32,3 +35,5 @@ int WolfcastInit(int, unsigned short, const unsigned short *, unsigned int,
 int WolfcastClientInit(unsigned int *, unsigned int *);
 int WolfcastClient(WOLFSSL *, unsigned short, unsigned int *, unsigned int *);
 int WolfcastServer(WOLFSSL *);
+
+#endif /* _WOLFCAST_H_ */

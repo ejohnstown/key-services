@@ -1,5 +1,5 @@
 LIB_PATH=/usr/local
-CFLAGS=-Wall -I$(LIB_PATH)/include
+CFLAGS=-Wall -I$(LIB_PATH)/include -I../wolfcast
 DEBUG_CFLAGS=
 NETX_CFLAGS=
 

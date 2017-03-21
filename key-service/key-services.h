@@ -90,8 +90,12 @@ int KeyServer_Run(void* heap);
 int KeyServer_IsRunning(void);
 void KeyServer_Stop(void);
 int KeyServer_GenNewKey(void* heap);
+int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,
+    unsigned char* serverRandom, int serverRandomSz,
+    unsigned char* clientRandom, int clientRandomSz, void* heap);
 
 int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
 int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, void* heap);
+int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
 
 #endif /* _KEY_SERVICE_H_ */
