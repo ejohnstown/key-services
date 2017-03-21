@@ -11,6 +11,8 @@
         int rxFd;
         struct sockaddr_in tx;
         unsigned int txSz;
+        unsigned char *rxPacket;
+        unsigned long rxPacketSz;
     } SocketInfo_t;
 #else
     #include "nx_api.h"
@@ -27,13 +29,15 @@
         NX_UDP_SOCKET rxSocket;
         ULONG ipAddr;
         UINT port;
+        NX_PACKET *rxPacket;
     } SocketInfo_t;
 #endif
 
-int WolfcastInit(int, unsigned short, const unsigned short *, unsigned int,
-                 WOLFSSL_CTX **, WOLFSSL **, SocketInfo_t *);
+int WolfcastInit(int, unsigned short, WOLFSSL_CTX **, SocketInfo_t *);
 int WolfcastClientInit(unsigned int *, unsigned int *);
-int WolfcastClient(WOLFSSL *, unsigned short, unsigned int *, unsigned int *);
+int WolfcastClient(SocketInfo_t *, WOLFSSL *, WOLFSSL *,
+                   unsigned short, unsigned short,
+                   unsigned int *, unsigned int *);
 int WolfcastServer(WOLFSSL *);
 
 #endif /* _WOLFCAST_H_ */

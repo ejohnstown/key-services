@@ -70,6 +70,49 @@
 
 
 static int
+BufferDtlsRxCallback(
+    WOLFSSL *ssl,
+    char *buf, int sz,
+    void *ctx)
+{
+    SocketInfo_t *si;
+    byte *packet;
+    unsigned long packetSz;
+    int error = 0;
+
+    (void)ssl;
+
+    if (ctx == NULL || buf == NULL || sz <= 0) {
+        error = 1;
+        WCERR("receive callback invalid parameters");
+    }
+
+    if (!error) {
+        si = (SocketInfo_t*)ctx;
+        packet = si->rxPacket;
+        packetSz = si->rxPacketSz;
+
+        if (packet == NULL || packetSz == 0) {
+            error = 1;
+            WCERR("receive callback no rx packet");
+        }
+    }
+
+    if (!error) {
+        memcpy(buf, packet, packetSz);
+        sz = (int)packetSz;
+        si->rxPacket = NULL;
+    }
+    else {
+        sz = WOLFSSL_CBIO_ERR_GENERAL;
+        WCERR("rx error");
+    }
+
+    return sz;
+}
+
+
+static int
 CreateSockets(SocketInfo_t* si, int isClient)
 {
     int error = 0, on = 1, off = 0;
@@ -311,13 +354,8 @@ NetxDtlsRxCallback(
 
     if (!error) {
         si = (SocketInfo_t*)ctx;
+        pkt = si->rxPacket;
 
-        ret = nx_udp_socket_receive(&si->rxSocket, &pkt, NX_NO_WAIT);
-        if (ret != NX_SUCCESS)
-            error = 1;
-    }
-
-    if (!error) {
         ret = nx_packet_length_get(pkt, &rxSz);
         if (ret != NX_SUCCESS) {
             error = 1;
@@ -348,8 +386,10 @@ NetxDtlsRxCallback(
         }
     }
 
-    if (!error)
+    if (!error) {
         sz = (int)rxSz;
+        si->rxPacket = NULL;
+    }
     else {
         if (ret == NX_NO_PACKET)
             sz = WOLFSSL_CBIO_ERR_WANT_READ;
@@ -498,23 +538,116 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
 #endif
 
 
+/* WolfcastSessionNew
+ * In separating out setup from run behavior, the contents of this
+ * function used to be in WolfcastInit(). A new session will be created
+ * every time there is a new key. The old session will be kept around
+ * for a short time to allow a device to keep receiving messages from
+ * devices that haven't rekeyed yet.
+ *
+ * This creates a new wolfSSL object and applies the same settings to
+ * it. If any step fails after a successful instantiation of the object,
+ * it will be freed. */
 int
-WolfcastInit(
-        int isClient,
-        unsigned short myId,
-        const unsigned short *peerIdList,
-        unsigned int peerIdListSz,
-        WOLFSSL_CTX **ctx,
-        WOLFSSL **ssl,
-        SocketInfo_t *si)
+WolfcastSessionNew(WOLFSSL **ssl, WOLFSSL_CTX *ctx,
+                   SocketInfo_t *si, int isClient,
+                   const unsigned short *peerIdList,
+                   unsigned int peerIdListSz)
 {
-    int ret, error = 0;
+    int error = 0;
+    int ret;
 
     if (ctx == NULL || ssl == NULL || si == NULL ||
         (isClient && (peerIdList == NULL || peerIdListSz == 0))) {
 
         error = 1;
-        WCERR("CreateSessions invalid parameters");
+        WCERR("WolfcastSessionNew invalid parameters");
+    }
+
+    if (!error) {
+        *ssl = wolfSSL_new(ctx);
+        if (*ssl == NULL) {
+            error = 1;
+            WCERR("ssl new error");
+        }
+    }
+
+#ifndef NETX
+    if (!error && isClient) {
+        wolfSSL_SetIOReadCtx(*ssl, si);
+    }
+
+    if (!error) {
+        ret = wolfSSL_set_write_fd(*ssl, si->txFd);
+        if (ret != SSL_SUCCESS) {
+            error = 1;
+            WCERR("set ssl write fd error");
+        }
+    }
+
+    if (!error) {
+        ret = wolfSSL_dtls_set_peer(*ssl, &si->tx, si->txSz);
+        if (ret != SSL_SUCCESS) {
+            error = 1;
+            WCERR("set ssl sender error");
+        }
+    }
+#else
+    if (!error) {
+        wolfSSL_SetIOWriteCtx(*ssl, si);
+        wolfSSL_SetIOReadCtx(*ssl, si);
+    }
+#endif
+
+    if (isClient) {
+        if (!error) {
+            wolfSSL_set_using_nonblock(*ssl, 1);
+            ret = wolfSSL_mcast_set_highwater_ctx(*ssl, (void*)seqHwCbCtx);
+            if (ret != SSL_SUCCESS) {
+                error = 1;
+                WCERR("set highwater ctx error");
+            }
+        }
+
+        if (!error) {
+            unsigned int i;
+            for (i = 0; i < peerIdListSz; i++) {
+                ret = wolfSSL_mcast_peer_add(*ssl, peerIdList[i], 0);
+                if (ret != SSL_SUCCESS) {
+                    error = 1;
+                    WCERR("mcast add peer error");
+                    break;
+                }
+            }
+        }
+    }
+
+    if (error && *ssl != NULL) {
+        wolfSSL_free(*ssl);
+    }
+
+    return error;
+}
+
+
+/* WolfcastInit
+ * Initializes wolfCast. Sets up the key serivce socket layer. Sets up
+ * wolfSSL. Creates the sockets used by either the client or server.
+ * Initializes the wolfSSL context, its static memory pool, I/O callbacks
+ * as appropriate for NETX or not, multicast ID, and sequence number
+ * callback. */
+int
+WolfcastInit(
+        int isClient,
+        unsigned short myId,
+        WOLFSSL_CTX **ctx,
+        SocketInfo_t *si)
+{
+    int ret, error = 0;
+
+    if (ctx == NULL) {
+        error = 1;
+        WCERR("WolfcastInit invalid parameters");
     }
 
     if (!error) {
@@ -592,19 +725,21 @@ WolfcastInit(
     }
 #endif
 
-#ifdef NETX
-    if (!error) {
-        wolfSSL_SetIOSend(*ctx, NetxDtlsTxCallback);
-        wolfSSL_SetIORecv(*ctx, NetxDtlsRxCallback);
-    }
-#endif
-
     if (!error) {
         ret = wolfSSL_CTX_mcast_set_member_id(*ctx, myId);
         if (ret != SSL_SUCCESS) {
             error = 1;
             WCERR("set mcast member id error");
         }
+    }
+
+    if (!error) {
+#ifdef NETX
+        wolfSSL_SetIOSend(*ctx, NetxDtlsTxCallback);
+        wolfSSL_SetIORecv(*ctx, NetxDtlsRxCallback);
+#else
+        wolfSSL_SetIORecv(*ctx, BufferDtlsRxCallback);
+#endif
     }
 
     if (!error && isClient) {
@@ -615,73 +750,52 @@ WolfcastInit(
         }
     }
 
-    if (!error) {
-        *ssl = wolfSSL_new(*ctx);
-        if (*ssl == NULL) {
-            error = 1;
-            WCERR("ssl new error");
-        }
-    }
-
-#ifndef NETX
-    if (!error && isClient) {
-        ret = wolfSSL_set_read_fd(*ssl, si->rxFd);
-        if (ret != SSL_SUCCESS) {
-            error = 1;
-            WCERR("set ssl read fd error");
-        }
-    }
-
-    if (!error) {
-        ret = wolfSSL_set_write_fd(*ssl, si->txFd);
-        if (ret != SSL_SUCCESS) {
-            error = 1;
-            WCERR("set ssl write fd error");
-        }
-    }
-
-    if (!error) {
-        ret = wolfSSL_dtls_set_peer(*ssl, &si->tx, si->txSz);
-        if (ret != SSL_SUCCESS) {
-            error = 1;
-            WCERR("set ssl sender error");
-        }
-    }
-#else
-    if (!error) {
-        wolfSSL_SetIOWriteCtx(*ssl, si);
-        wolfSSL_SetIOReadCtx(*ssl, si);
-    }
-#endif
-
-    if (isClient) {
-        if (!error) {
-            wolfSSL_set_using_nonblock(*ssl, 1);
-            ret = wolfSSL_mcast_set_highwater_ctx(*ssl, (void*)seqHwCbCtx);
-            if (ret != SSL_SUCCESS) {
-                error = 1;
-                WCERR("set highwater ctx error");
-            }
-        }
-
-        if (!error) {
-            unsigned int i;
-            for (i = 0; i < peerIdListSz; i++) {
-                ret = wolfSSL_mcast_peer_add(*ssl, peerIdList[i], 0);
-                if (ret != SSL_SUCCESS) {
-                    error = 1;
-                    WCERR("mcast add peer error");
-                    break;
-                }
-            }
-        }
-    }
-
     return error;
 }
 
 
 #ifndef NO_WOLFCAST_CLIENT
+
+typedef struct EpochPeek {
+    unsigned char pad[3];
+    unsigned char epoch[2];
+} EpochPeek;
+
+
+static unsigned short GetEpoch_ex(const byte *buf)
+{
+    unsigned short epoch = 0;
+
+    if (buf != NULL) {
+        EpochPeek *peek = (EpochPeek*)buf;
+        epoch = (peek->epoch[0] << 8) | peek->epoch[1];
+    }
+
+    return epoch;
+}
+
+
+#ifdef NETX
+static unsigned short GetEpoch(NX_PACKET *packet)
+{
+    unsigned char buf[sizeof(EpochPeek)];
+    ULONG bytesCopied;
+    UINT status;
+    unsigned short epoch = 0;
+
+    status = nx_packet_data_extract_offset(pkt, 0,
+                                           buf, sizeof(buf),
+                                           &bytesCopied);
+
+    if (status == NX_SUCCESS && bytesCopied == sizeof(buf)) {
+        epoch = GetEpoch_ex(buf);
+    }
+
+    return epoch;
+}
+#else
+#define GetEpoch GetEpoch_ex
+#endif
 
 static inline unsigned int
 WolfcastClientUpdateTimeout(unsigned int curTime)
@@ -705,29 +819,97 @@ WolfcastClientInit(unsigned int *txtime, unsigned int *count)
 
 
 int
-WolfcastClient(WOLFSSL *ssl, unsigned short myId,
+WolfcastClient(SocketInfo_t *si,
+               WOLFSSL *curSsl, WOLFSSL *prevSsl,
+               unsigned short curEpoch, unsigned short myId,
                unsigned int *txtime, unsigned int *count)
 {
     int error = 0;
     char msg[MSG_SIZE];
 
-    if (ssl == NULL || txtime == NULL || count == NULL) {
+    if (curSsl == NULL || txtime == NULL || count == NULL) {
+        /* prevSsl is allowed to be NULL, and is checked later. */
         error = 1;
         WCERR("WolfcastClient bad parameters");
     }
 
     if (!error) {
-        unsigned short peerId;
-        ssize_t n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
-        if (n < 0) {
-            n = wolfSSL_get_error(ssl, n);
-            if (n != SSL_ERROR_WANT_READ) {
-                error = 1;
-                WCERR(wolfSSL_ERR_reason_error_string(n));
+#ifdef NETX
+        UINT n;
+
+        n = nx_udp_socket_receive(si->rxSocket, &nxPacket, NX_NO_WAIT);
+        if (n == NX_SUCCESS) {
+            WOLFSSL *ssl;
+            unsigned short peerId;
+            unsigned short epoch;
+
+            epoch = GetEpoch(nxPacket);
+            si->rxPacket = nxPacket;
+            ssl = (epoch == curEpoch) ? curSsl : prevSsl;
+
+            if (ssl != NULL) {
+                n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
+                if (n < 0) {
+                    n = wolfSSL_get_error(ssl, n);
+                    if (n != SSL_ERROR_WANT_READ) {
+                        error = 1;
+                        WCERR(wolfSSL_ERR_reason_error_string(n));
+                    }
+                }
+                else
+                    WCPRINTF("got msg from peer %u %s\n", peerId, msg);
+            }
+            else {
+                WCPRINTF("Ignoring message from previous Epoch.\n");
+            }
+
+            if (si->rxPacket != NULL) {
+                ret = nx_packet_release(si->rxPacket);
+                if (ret != NX_SUCCESS) {
+                    error = 1;
+                    WCERR("couldn't release packet");
+                }
+                si->rxPacket = NULL;
             }
         }
-        else
-            WCPRINTF("got msg from peer %u %s\n", peerId, msg);
+#else
+        byte packet[1500];
+        ssize_t n;
+
+        n = recvfrom(si->rxFd, packet, sizeof(packet), 0, NULL, 0);
+        if (n > 0) {
+            WOLFSSL *ssl;
+            unsigned short peerId;
+            unsigned short epoch;
+
+            si->rxPacket = packet;
+            si->rxPacketSz = (unsigned long)n;
+            epoch = GetEpoch(packet);
+            WCPRINTF("current epoch = %u, received epoch = %u\n", curEpoch, epoch);
+            if (epoch == curEpoch)
+                ssl = curSsl;
+            else if (epoch == curEpoch - 1)
+                ssl = prevSsl;
+            else
+                ssl = NULL;
+
+            if (ssl != NULL) {
+                n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
+                if (n < 0) {
+                    n = wolfSSL_get_error(ssl, n);
+                    if (n != SSL_ERROR_WANT_READ) {
+                        error = 1;
+                        WCERR(wolfSSL_ERR_reason_error_string(n));
+                    }
+                }
+                else
+                    WCPRINTF("got msg from peer %u %s\n", peerId, msg);
+            }
+            else {
+                WCPRINTF("Ignoring message from previous Epoch.\n");
+            }
+        }
+#endif
     }
 
     if (!error) {
@@ -740,10 +922,10 @@ WolfcastClient(WOLFSSL *ssl, unsigned short myId,
 
             sprintf(msg, "%u sending message %d", myId, (*count)++);
             msg_len = (int)strlen(msg) + 1;
-            n = wolfSSL_write(ssl, msg, msg_len);
+            n = wolfSSL_write(curSsl, msg, msg_len);
             if (n < 0) {
                 error = 1;
-                n = wolfSSL_get_error(ssl, n);
+                n = wolfSSL_get_error(curSsl, n);
                 WCERR(wolfSSL_ERR_reason_error_string(n));
             }
             else
@@ -807,7 +989,9 @@ main(
     unsigned int peerIdListSz = 0;
     SocketInfo_t si;
     WOLFSSL_CTX *ctx = NULL;
-    WOLFSSL *ssl = NULL;
+    WOLFSSL *curSsl = NULL;
+    WOLFSSL *prevSsl = NULL;
+    unsigned short epoch = 0;
 
     if (argc == 3 || argc == 4) {
         long n;
@@ -872,9 +1056,7 @@ main(
     }
 
     if (!error)
-        error = WolfcastInit(isClient, myId,
-                             peerIdList, peerIdListSz,
-                             &ctx, &ssl, &si);
+        error = WolfcastInit(isClient, myId, &ctx, &si);
 
     if (isClient) {
 #ifndef NO_WOLFCAST_CLIENT
@@ -890,8 +1072,10 @@ main(
             struct timeval timeout = {0, 500000};
 
             if (iteration == 0) {
+                WOLFSSL *newSsl;
                 KeyRespPacket_t keyResp;
                 int result;
+                unsigned short newEpoch;
 
                 iteration = 20;
 
@@ -902,18 +1086,35 @@ main(
                 }
 
                 if (!error) {
-                    result = wolfSSL_set_secret(ssl,
-                                    (keyResp.epoch[0] << 8) | keyResp.epoch[1],
+                    error = WolfcastSessionNew(&newSsl, ctx, &si, 1,
+                                               peerIdList, peerIdListSz);
+
+                    if (error || newSsl == NULL) {
+                        WCERR("Couldn't create new ssl object.");
+                    }
+                }
+
+                if (!error) {
+                    newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
+                    WCPRINTF("key set newEpoch = %u\n", newEpoch);
+                    result = wolfSSL_set_secret(newSsl, newEpoch,
                                     keyResp.pms, sizeof(keyResp.pms),
-                                    keyResp.clientRandom, keyResp.serverRandom,
+                                    keyResp.clientRandom,
+                                    keyResp.serverRandom,
                                     keyResp.suite);
                     if (result != SSL_SUCCESS) {
                         error = 1;
                         WCERR("Couldn't set the session secret");
                     }
-                    else {
-                        WCPRINTF("Key has been set.\n");
-                    }
+                }
+
+                if (!error) {
+                    WCPRINTF("Key has been set.\n");
+                    if (prevSsl != NULL)
+                        wolfSSL_free(prevSsl);
+                    prevSsl = curSsl;
+                    curSsl = newSsl;
+                    epoch = newEpoch;
                 }
 
                 memset(&keyResp, 0, sizeof(keyResp));
@@ -930,8 +1131,12 @@ main(
                 break;
             }
 
-            if (FD_ISSET(si.rxFd, &readfds))
-                error = WolfcastClient(ssl, myId, &txtime, &count);
+            if (FD_ISSET(si.rxFd, &readfds)) {
+                error = WolfcastClient(&si,
+                                       curSsl, prevSsl,
+                                       epoch, myId,
+                                       &txtime, &count);
+            }
         }
 #else
         error = 1;
@@ -939,34 +1144,51 @@ main(
     }
     else {
 #ifndef NO_WOLFCAST_SERVER
-                KeyRespPacket_t keyResp;
-                int result;
+        {
+            WOLFSSL *newSsl;
+            KeyRespPacket_t keyResp;
+            int result;
+            unsigned short newEpoch;
 
-                result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
-                if (result != 0) {
+            result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+            if (result != 0) {
+                error = 1;
+                WCERR("Key retrieval failed");
+            }
+
+            if (!error) {
+                error = WolfcastSessionNew(&newSsl, ctx, &si, 0, NULL, 0);
+
+                if (error || newSsl == NULL) {
+                    WCERR("Couldn't create new ssl object.");
+                }
+            }
+
+            if (!error) {
+                newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
+                result = wolfSSL_set_secret(newSsl, newEpoch,
+                                keyResp.pms, sizeof(keyResp.pms),
+                                keyResp.clientRandom, keyResp.serverRandom,
+                                keyResp.suite);
+                if (result != SSL_SUCCESS) {
                     error = 1;
-                    WCERR("Key retrieval failed");
+                    WCERR("Couldn't set the session secret");
                 }
-
-                if (!error) {
-                    result = wolfSSL_set_secret(ssl,
-                                    (keyResp.epoch[0] << 8) | keyResp.epoch[1],
-                                    keyResp.pms, sizeof(keyResp.pms),
-                                    keyResp.clientRandom, keyResp.serverRandom,
-                                    keyResp.suite);
-                    if (result != SSL_SUCCESS) {
-                        error = 1;
-                        WCERR("Couldn't set the session secret");
-                    }
-                    else {
-                        WCPRINTF("Key has been set.\n");
-                    }
+                else {
+                    WCPRINTF("Key has been set.\n");
+                    if (prevSsl != NULL)
+                        wolfSSL_free(prevSsl);
+                    prevSsl = curSsl;
+                    curSsl = newSsl;
+                    epoch = newEpoch;
                 }
+            }
 
-                memset(&keyResp, 0, sizeof(keyResp));
+            memset(&keyResp, 0, sizeof(keyResp));
+        }
 
         while (!error) {
-            error = WolfcastServer(ssl);
+            error = WolfcastServer(curSsl);
             sleep(1);
         }
 #else
