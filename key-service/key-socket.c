@@ -159,7 +159,8 @@ int KeySocket_Connect(KS_SOCKET_T sockfd, const struct in_addr* srvAddr, const u
 }
 
 
-int KeySocket_Bind(KS_SOCKET_T sockFd, const struct in_addr* listenAddr, unsigned short listenPort)
+int KeySocket_Bind(KS_SOCKET_T sockFd, const struct in_addr* listenAddr,
+    const unsigned short listenPort)
 {
     int ret = 0;
 
@@ -212,7 +213,7 @@ int KeySocket_Listen(KS_SOCKET_T sockFd, unsigned short listenPort, int listenMa
     int ret;
 
 #ifdef HAVE_NETX
-    ret = nx_tcp_server_socket_listen(nxIp, listenPort, sockFd, listenMaxQueue, NULL);
+    ret = (int)nx_tcp_server_socket_listen(nxIp, listenPort, sockFd, listenMaxQueue, NULL);
     if (ret != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
         printf("Fatal error: listen error %d\n", ret);
@@ -235,6 +236,30 @@ int KeySocket_Listen(KS_SOCKET_T sockFd, unsigned short listenPort, int listenMa
     return ret;
 }
 
+int KeySocket_Relisten(KS_SOCKET_T sockFd, KS_SOCKET_T listenFd,
+    const unsigned short srvPort)
+{
+    int ret = 0;
+
+#ifdef HAVE_NETX
+    ret = nx_tcp_server_socket_unaccept(sockFd);
+    if (ret == NX_SUCCESS) {
+        ret = nx_tcp_server_socket_relisten(nxIp, srvPort, listenfd);
+        if (ret != NX_SUCCESS) {
+            ret = -1;
+        }
+    }
+    else {
+        ret = -1;
+    }
+#else
+    (void)sockFd;
+    (void)listenFd;
+    (void)srcPort;
+#endif
+
+    return ret;
+}
 
 int KeySocket_Select(KS_SOCKET_T sockFd, int timeoutMs)
 {
@@ -278,21 +303,10 @@ int KeySocket_Accept(KS_SOCKET_T sockFd, KS_SOCKET_T* pConnfd, int timeoutMs)
 #ifdef HAVE_NETX
     (void)timeoutMs;
 
-    if (sockFd->nx_tcp_socket_state != NX_TCP_LISTEN_STATE) {
-        nx_tcp_socket_disconnect(sockFd, NX_WAIT_FOREVER);
-    }
+    ret = (int)nx_tcp_server_socket_accept(sockFd, NX_WAIT_FOREVER);
+    if (ret == NX_SUCCESS)
+        ret = 1;
 
-    nx_tcp_server_socket_unaccept(sockFd);
-    nx_tcp_server_socket_relisten(sockFd->nx_tcp_socket_ip_ptr,
-        sockFd->nx_tcp_socket_port, sockFd);
-
-    ret = nx_tcp_server_socket_accept(sockFd, NX_WAIT_FOREVER);
-    if (ret != NX_SUCCESS) {
-#if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("Fatal error: accept error\n");
-#endif
-        return -1;
-    }
     *pConnfd = sockFd; /* use same socket for listen and connection */
 
 #else
@@ -507,13 +521,44 @@ int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
     return sent;
 }
 
+void KeySocket_Unlisten(const unsigned short srvPort)
+{
+    if (sockfd != KS_SOCKET_T_INIT) {
+#ifdef HAVE_NETX
+        nx_tcp_server_socket_unlisten(nxIp, srvPort);
+#else
+
+#endif
+    }
+}
+
+void KeySocket_Unbind(KS_SOCKET_T sockfd)
+{
+    if (sockfd != KS_SOCKET_T_INIT) {
+#ifdef HAVE_NETX
+        nx_tcp_client_socket_unbind(sockfd);
+#else
+
+#endif
+    }
+}
 
 void KeySocket_Close(KS_SOCKET_T* pSockfd)
 {
     if (*pSockfd != KS_SOCKET_T_INIT) {
 #ifdef HAVE_NETX
         nx_tcp_socket_disconnect(*pSockfd, NX_NO_WAIT);
-        nx_tcp_client_socket_unbind(*pSockfd);
+#else
+        close(*pSockfd);
+        *pSockfd = KS_SOCKET_T_INIT;
+#endif
+    }
+}
+
+void KeySocket_Delete(KS_SOCKET_T* pSockfd)
+{
+    if (*pSockfd != KS_SOCKET_T_INIT) {
+#ifdef HAVE_NETX
         nx_tcp_socket_delete(*pSockfd);
 #else
         close(*pSockfd);

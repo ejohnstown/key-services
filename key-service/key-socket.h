@@ -102,14 +102,18 @@ int  KeySocket_SetIpMembership(KS_SOCKET_T sockFd, const struct in_addr* multiad
 int  KeySocket_SetNonBlocking(KS_SOCKET_T sockFd);
 int  KeySocket_Connect(KS_SOCKET_T sockfd, const struct in_addr* srvAddr, const unsigned short srvPort);
 int  KeySocket_Select(KS_SOCKET_T sockFd, int timeoutMs);
-int  KeySocket_Bind(KS_SOCKET_T sockFd, const struct in_addr* listenAddr, unsigned short listenPort);
+int  KeySocket_Bind(KS_SOCKET_T sockFd, const struct in_addr* listenAddr, const unsigned short listenPort);
 int  KeySocket_Listen(KS_SOCKET_T sockFd, unsigned short listenPort, int listenMaxQueue);
+int  KeySocket_Relisten(KS_SOCKET_T sockFd, KS_SOCKET_T listenFd, const unsigned short srvPort);
 int  KeySocket_Accept(KS_SOCKET_T sockFd, KS_SOCKET_T* pConnfd, int timeoutMs);
 int  KeySocket_Recv(KS_SOCKET_T sockFd, char *buf, int sz, int flags);
 int  KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags);
 int  KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags, struct sockaddr *addr, socklen_t *addrSz);
 int  KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags, struct sockaddr *addr, socklen_t *addrSz);
+void KeySocket_Unlisten(const unsigned short srvPort);
+void KeySocket_Unbind(KS_SOCKET_T sockfd);
 void KeySocket_Close(KS_SOCKET_T* pSockfd);
+void KeySocket_Delete(KS_SOCKET_T* pSockfd);
 
 int KeySocket_aton(const char *cp, struct in_addr *ap);
 

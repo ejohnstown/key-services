@@ -19,18 +19,19 @@
 
 /* Generic responses for all supported packet types */
 static CmdRespPacket_t* gRespPkt;
-static int gKeyServerInitDone = 0;
+static volatile int gKeyServerInitDone = 0;
 static int gKeyServerRunning = 0;
 static int gKeyServerStop = 0;
 static unsigned short gKeyServerEpoch;
+static WOLFSSL_CTX* gCtx = NULL;
 
 #ifdef WOLFSSL_STATIC_MEMORY
-#ifdef HAVE_NETX
-static byte clientMemory[80000];
-static byte clientMemoryIO[34500];
-#endif
-static byte serverMemory[80000];
-static byte serverMemoryIO[34500];
+    #ifdef HAVE_NETX
+        static byte clientMemory[80000];
+        static byte clientMemoryIO[34500];
+    #endif
+    static byte serverMemory[80000];
+    static byte serverMemoryIO[34500];
 #endif
 
 /*
@@ -210,7 +211,9 @@ static int KeyServer_Init(void* heap)
 {
     int ret = 0;
 
-    if (gKeyServerInitDone == 0) {
+    gKeyServerInitDone++;
+    if (gKeyServerInitDone == 1) {
+
         gRespPkt = (CmdRespPacket_t*)XMALLOC(
                         sizeof(CmdRespPacket_t) * (CMD_PKT_TYPE_COUNT-1),
                         heap, DYNAMIC_TYPE_TMP_BUFFER);
@@ -221,15 +224,66 @@ static int KeyServer_Init(void* heap)
         /* init each command type */
         ret = KeyReq_BuildKeyReq(heap);
 
-        gKeyServerInitDone = 1;
+        /* init the WOLFSSL_CTX */
+        /* create and initialize WOLFSSL_CTX structure for TLS 1.2 only */
+    #ifndef WOLFSSL_STATIC_MEMORY
+        gCtx = wolfSSL_CTX_new(wolfTLSv1_2_server_method());
+    #else
+        ret = wolfSSL_CTX_load_static_memory(
+                &gCtx, wolfTLSv1_2_server_method_ex,
+                serverMemory, sizeof(serverMemory), 0, 1);
+        if (ret != SSL_SUCCESS) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("Error: unable to load static memory and create ctx\n");
+        #endif
+            goto exit;
+        }
+
+        /* load in a buffer for IO */
+        ret = wolfSSL_CTX_load_static_memory(
+                &gCtx, NULL, serverMemoryIO, sizeof(serverMemoryIO),
+                WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
+        if (ret != SSL_SUCCESS) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("Error: unable to load static IO memory and create ctx\n");
+        #endif
+            goto exit;
+        }
+    #endif
+        if (gCtx == NULL) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("Error: wolfSSL_CTX_new error\n");
+        #endif
+            ret = MEMORY_E; goto exit;
+        }
+
+        /* use psk suite for security */
+        wolfSSL_CTX_set_psk_server_callback(gCtx, KeyServer_PskCb);
+        wolfSSL_CTX_use_psk_identity_hint(gCtx, SERVER_IDENTITY);
+        if (wolfSSL_CTX_set_cipher_list(gCtx, PSK_CIPHER_SUITE)
+                                       != SSL_SUCCESS) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("Error: server can't set cipher list\n");
+        #endif
+            ret = -1; goto exit;
+        }
     }
+
+exit:
 
     return ret;
 }
 
 static void KeyServer_Free(void* heap)
 {
-    XFREE(gRespPkt, heap, DYNAMIC_TYPE_TMP_BUFFER);
+    gKeyServerInitDone--;
+    if (gKeyServerInitDone == 0) {
+
+        wolfSSL_CTX_free(gCtx);
+
+        XFREE(gRespPkt, heap, DYNAMIC_TYPE_TMP_BUFFER);
+        gRespPkt = NULL;
+    }
 }
 
 int KeyServer_Run(void* heap)
@@ -237,7 +291,6 @@ int KeyServer_Run(void* heap)
     int                 ret = 0;
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
     KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
-    WOLFSSL_CTX*        ctx = NULL;
     WOLFSSL*            ssl = NULL;
 #ifdef HAVE_NETX
     NX_TCP_SOCKET tcpSock;
@@ -259,49 +312,6 @@ int KeyServer_Run(void* heap)
     if (ret != 0)
         goto exit;
 
-    /* create and initialize WOLFSSL_CTX structure for TLS 1.2 only */
-#ifndef WOLFSSL_STATIC_MEMORY
-    ctx = wolfSSL_CTX_new(wolfTLSv1_2_server_method());
-#else
-    ret = wolfSSL_CTX_load_static_memory(
-            &ctx, wolfTLSv1_2_server_method_ex,
-            serverMemory, sizeof(serverMemory), 0, 1);
-    if (ret != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: unable to load static memory and create ctx\n");
-    #endif
-        goto exit;
-    }
-
-    /* load in a buffer for IO */
-    ret = wolfSSL_CTX_load_static_memory(
-            &ctx, NULL, serverMemoryIO, sizeof(serverMemoryIO),
-            WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
-    if (ret != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: unable to load static IO memory and create ctx\n");
-    #endif
-        goto exit;
-    }
-#endif
-    if (ctx == NULL) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: wolfSSL_CTX_new error\n");
-    #endif
-        ret = MEMORY_E; goto exit;
-    }
-
-    /* use psk suite for security */
-    wolfSSL_CTX_set_psk_server_callback(ctx, KeyServer_PskCb);
-    wolfSSL_CTX_use_psk_identity_hint(ctx, SERVER_IDENTITY);
-    if (wolfSSL_CTX_set_cipher_list(ctx, PSK_CIPHER_SUITE)
-                                   != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: server can't set cipher list\n");
-    #endif
-        ret = -1; goto exit;
-    }
-
     /* create socket */
     ret = KeySocket_CreateTcpSocket(&listenfd);
     if (ret != 0) {
@@ -309,33 +319,20 @@ int KeyServer_Run(void* heap)
     }
 
     /* setup socket listener */
-#ifdef HAVE_NETX
-    ret = (int)nx_tcp_server_socket_listen(nxIp, SERV_PORT, listenfd, LISTENQ, NULL);
-    if (ret != NX_SUCCESS) {
-        printf("Error: cannot listen to the socket. (%d)\n", ret);
-        goto exit;
-    }
-#else
     ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, SERV_PORT);
     if (ret == 0) {
         ret = KeySocket_Listen(listenfd, SERV_PORT, LISTENQ);
     }
     if (ret != 0)
         goto exit;
-#endif
 
     /* main loop for accepting and responding to clients */
     gKeyServerRunning = 1;
     while (gKeyServerStop == 0) {
-#ifdef HAVE_NETX
-        ret = (int)nx_tcp_server_socket_accept(listenfd, NX_WAIT_FOREVER);
-        if (ret == NX_SUCCESS) ret = 1;
-#else
         ret = KeySocket_Accept(listenfd, &connfd, 100);
-#endif
         if (ret > 0) {
             /* create WOLFSSL object and respond */
-            if ((ssl = wolfSSL_new(ctx)) == NULL) {
+            if ((ssl = wolfSSL_new(gCtx)) == NULL) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
                 printf("Error: wolfSSL_new\n");
             #endif
@@ -358,11 +355,8 @@ int KeyServer_Run(void* heap)
             /* closes the connections after responding */
             wolfSSL_shutdown(ssl);
             wolfSSL_free(ssl);
-#ifdef HAVE_NETX
-            nx_tcp_socket_disconnect(connfd, NX_NO_WAIT);
-#else
             KeySocket_Close(&connfd);
-#endif
+
             /* XXX Hack to force updates. Check against 2 if adding the linux peer */
             if (keyFlag == 1) {
                 gKeyServerInitDone = 0;
@@ -373,14 +367,10 @@ int KeyServer_Run(void* heap)
             else
                 keyFlag++;
         }
-#ifdef HAVE_NETX
-        ret = nx_tcp_server_socket_unaccept(connfd);
-        if (ret != NX_SUCCESS)
+
+        ret = KeySocket_Relisten(connfd, listenfd, SERV_PORT);
+        if (ret != 0)
             goto exit;
-        ret = nx_tcp_server_socket_relisten(nxIp, SERV_PORT, listenfd);
-        if (ret != NX_SUCCESS)
-            goto exit;
-#endif
     }
 
 exit:
@@ -393,16 +383,12 @@ exit:
     }
 #endif
 
-#ifdef HAVE_NETX
-    nx_tcp_server_socket_unlisten(nxIp, SERV_PORT);
-    nx_tcp_socket_delete(listenfd);
-#else
+    KeySocket_Unlisten(SERV_PORT);
     KeySocket_Close(&listenfd);
-#endif
+    KeySocket_Delete(&listenfd);
 
     /* free up memory used by wolfSSL */
     wolfSSL_free(ssl);
-    wolfSSL_CTX_free(ctx);
 
     KeyServer_Free(heap);
 
@@ -692,4 +678,3 @@ int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap)
     /* TODO: Do a DTLS UDP broadcast (.255) request on key server port with cmd to ask servers to respond */
     return 0;
 }
-
