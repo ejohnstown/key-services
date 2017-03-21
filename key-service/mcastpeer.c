@@ -156,16 +156,21 @@ static void* PeerThread(void* arg)
     byte memory[80000];
     byte memoryIO[34500];
 #endif
+    struct in_addr keySrvAddr;
 
     gettimeofday(&start, NULL);
 
-    /* use peer msg buffer for key response info */
-    keyResp = (KeyRespPacket_t*)peer->msg;
+    ret = KeyClient_FindMaster(&keySrvAddr, heap);
+    if (ret != 0) {
+        printf("unable to find master %d\n", ret);
+        XMEMCPY(&keySrvAddr, &gKeySrvAddr, sizeof(gKeySrvAddr));
+    }
 
     /* Get PMS, Server/Client Random from Key Server */
-    ret = KeyClient_GetKey(&gKeySrvAddr, keyResp, heap);
+    keyResp = (KeyRespPacket_t*)peer->msg; /* use peer msg buffer for key response info */
+    ret = KeyClient_GetKey(&keySrvAddr, keyResp, heap);
     if (ret != 0) {
-        printf("unable to get key from server\n");
+        printf("unable to get key from server %d\n", ret);
 
         /* continue anyway for testing, using pre-determined values */
         memset(keyResp->pms, 0x23, sizeof(keyResp->pms));
@@ -330,9 +335,23 @@ static void* KeyServerThread(void* arg)
     return NULL;
 }
 
-static int KeyServerStart(pthread_t* tid)
+static void* KeyServerUdpThread(void* arg)
+{
+    void* heap = arg;
+    KeyServer_RunUdp(heap);
+    return NULL;
+}
+
+static int KeyServerStart(pthread_t* tid, pthread_t* tid_udp)
 {
     int ret = 0;
+
+    /* start key server on UDP */
+    ret = pthread_create(tid_udp, NULL, KeyServerUdpThread, NULL);
+    if (ret < 0) {
+        perror("key server UDP pthread_create failed");
+        return ret;
+    }
 
     /* start key server */
     ret = pthread_create(tid, NULL, KeyServerThread, NULL);
@@ -413,7 +432,7 @@ static void sig_handler(int signo)
 int main(int argc, char** argv)
 {
     int ret = 0;
-    pthread_t keySrvTid;
+    pthread_t keySrvTid, keySrvUdpTid;
     int peerThreads;
 
     if (argc < 2) {
@@ -437,7 +456,7 @@ int main(int argc, char** argv)
     wolfSSL_Init();
 
     /* start key server */
-    ret = KeyServerStart(&keySrvTid);
+    ret = KeyServerStart(&keySrvTid, &keySrvUdpTid);
     if (ret != 0) {
         goto exit;
     }

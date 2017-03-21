@@ -659,6 +659,10 @@ WolfcastInit(
     }
 
     if (!error) {
+    #if defined(DEBUG_WOLFSSL)
+        wolfSSL_Debugging_ON();
+    #endif
+
         ret = wolfSSL_Init();
         if (ret != SSL_SUCCESS) {
             error = 1;
@@ -1079,10 +1083,18 @@ main(
 
                 iteration = 20;
 
-                result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+                result = KeyClient_FindMaster(&keySrvAddr, NULL);
                 if (result != 0) {
                     error = 1;
-                    WCERR("Key retrieval failed");
+                    WCERR("unable to find master");
+                }
+
+                if (!error) {
+                    result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+                    if (result != 0) {
+                        error = 1;
+                        WCERR("Key retrieval failed");
+                    }
                 }
 
                 if (!error) {
@@ -1150,10 +1162,18 @@ main(
             int result;
             unsigned short newEpoch;
 
-            result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+            result = KeyClient_FindMaster(&keySrvAddr, NULL);
             if (result != 0) {
                 error = 1;
-                WCERR("Key retrieval failed");
+                WCERR("unable to find master");
+            }
+
+            if (!error) {
+                result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+                if (result != 0) {
+                    error = 1;
+                    WCERR("Key retrieval failed");
+                }
             }
 
             if (!error) {

@@ -109,7 +109,7 @@ int  KeySocket_Accept(KS_SOCKET_T sockFd, KS_SOCKET_T* pConnfd, int timeoutMs);
 int  KeySocket_Recv(KS_SOCKET_T sockFd, char *buf, int sz, int flags);
 int  KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags);
 int  KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags, struct sockaddr *addr, socklen_t *addrSz);
-int  KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags, struct sockaddr *addr, socklen_t *addrSz);
+int  KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags, struct sockaddr *addr, socklen_t addrSz);
 void KeySocket_Unlisten(const unsigned short srvPort);
 void KeySocket_Unbind(KS_SOCKET_T sockfd);
 void KeySocket_Close(KS_SOCKET_T* pSockfd);

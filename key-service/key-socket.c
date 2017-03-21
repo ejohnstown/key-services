@@ -441,16 +441,94 @@ int KeySocket_Recv(KS_SOCKET_T sockFd, char *buf, int sz, int flags)
     return recvd;
 }
 
+int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
+    struct sockaddr *addr, socklen_t *addrSz)
+{
+    int recvd = 0;
+#ifdef HAVE_NETX
+    NX_PACKET *nxPacket = NULL;
+    unsigned long rxSz = 0;
+    unsigned int ret;
+    int error = 0;
+
+    ret = nx_udp_socket_receive(sockFd, &nxPacket, NX_NO_WAIT);
+    if (ret != NX_SUCCESS)
+        error = 1;
+    }
+
+    if (!error) {
+        ret = nx_packet_length_get(nxPacket, &rxSz);
+        if (ret != NX_SUCCESS) {
+            error = 1;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("couldn't get packet length");
+        #endif
+        }
+    }
+
+    if (!error) {
+        if (rxSz > (unsigned long)sz) {
+            error = 1;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("receive packet too large for buffer");
+        #endif
+        }
+    }
+
+    if (!error) {
+        ret = nx_packet_data_retrieve(nxPacket, buf, &rxSz);
+        if (ret != NX_SUCCESS) {
+            error = 1;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("couldn't retrieve packet");
+        #endif
+        }
+    }
+
+    if (nxPacket != NULL) {
+        ret = nx_packet_release(nxPacket);
+        if (ret != NX_SUCCESS) {
+            error = 1;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("couldn't release packet");
+        #endif
+        }
+    }
+
+    if (!error)
+        recvd = (int)rxSz;
+    else {
+        if (ret == NX_NO_PACKET)
+            recvd = WOLFSSL_CBIO_ERR_WANT_READ;
+        else {
+            recvd = WOLFSSL_CBIO_ERR_GENERAL;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("rx error");
+        #endif
+        }
+    }
+
+    (void)addr;
+    (void)addrSz;
+    (void)flags;
+
+#else
+    recvd = (int)recvfrom(sockFd, buf, sz, flags, addr, addrSz);
+#endif
+
+    return recvd;
+}
+
 
 int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
 {
     int sent = 0;
 
 #ifdef HAVE_NETX
-    NX_PACKET*      packet;
+    NX_PACKET* nxPacket;
     int status;
 
-    status = nx_packet_allocate(nxPool, &packet, NX_TCP_PACKET, (ULONG)flags);
+    status = nx_packet_allocate(nxPool, &nxPacket, NX_TCP_PACKET, (ULONG)flags);
     if (status != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
         printf("NetX Send packet alloc error\n");
@@ -458,19 +536,19 @@ int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
 
-    status = nx_packet_data_append(packet, (char*)buf, sz, nxPool,
+    status = nx_packet_data_append(nxPacket, (char*)buf, sz, nxPool,
             (ULONG)flags);
     if (status != NX_SUCCESS) {
-        nx_packet_release(packet);
+        nx_packet_release(nxPacket);
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
         printf("NetX Send data append error\n");
 #endif
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
 
-    status = nx_tcp_socket_send(sockFd, packet, (ULONG)flags);
+    status = nx_tcp_socket_send(sockFd, nxPacket, (ULONG)flags);
     if (status != NX_SUCCESS) {
-        nx_packet_release(packet);
+        nx_packet_release(nxPacket);
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
         printf("NetX Send socket send error\n");
 #endif
@@ -521,12 +599,77 @@ int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
     return sent;
 }
 
+int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
+    struct sockaddr *addr, socklen_t addrSz)
+{
+    int sent = 0;
+
+#ifdef HAVE_NETX
+    NX_PACKET *nxPacket = NULL;
+    unsigned int ret;
+    int error = 0;
+
+
+    ret = nx_packet_allocate(sockFd, &nxPacket, NX_UDP_PACKET, NX_WAIT_FOREVER);
+    if (ret != NX_SUCCESS) {
+        error = 1;
+    #if KEY_SOCKET_LOGGING_LEVEL >= 1
+        printf("couldn't allocate packet wrapper");
+    #endif
+    }
+
+    if (!error) {
+        ret = nx_packet_data_append(nxPacket, buf, sz, sockFd, NX_WAIT_FOREVER);
+        if (ret != NX_SUCCESS) {
+            error = 1;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("couldn't append data to packet");
+        #endif
+        }
+    }
+
+    if (!error) {
+        sent = (int)nx_udp_socket_send(&sockFd, nxPacket,
+            addr->sin_addr.s_addr, addr->sin_port);
+        if (ret != NX_SUCCESS) {
+            error = 1;
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("tx error");
+        #endif
+        }
+    }
+
+    if (error) {
+        sent = WOLFSSL_CBIO_ERR_GENERAL;
+
+        /* In case of error, release packet. */
+        ret = nx_packet_release(nxPacket);
+        if (ret != NX_SUCCESS) {
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("couldn't release packet");
+        #endif
+        }
+    }
+
+    (void)addr;
+    (void)addrSz;
+    (void)flags;
+
+#else
+
+    sent = sendto(sockFd, buf, sz, flags, addr, addrSz);
+
+#endif
+
+    return sent;
+}
+
 void KeySocket_Unlisten(const unsigned short srvPort)
 {
 #ifdef HAVE_NETX
     nx_tcp_server_socket_unlisten(nxIp, srvPort);
 #else
-
+    (void)srvPort;
 #endif
 }
 

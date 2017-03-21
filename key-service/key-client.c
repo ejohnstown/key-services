@@ -8,21 +8,23 @@ int main(int argc, char **argv)
     char* srvIp;
     struct in_addr srvAddr;
 
-    /* must include an ip address of this will flag */
+    /* optionally include an ip address of this will flag */
     if (argc != 2) {
         printf("Usage: key-client <server IP>\n");
-        return 1;
     }
 
-    /* parse server IP */
-    srvIp = argv[1];
     XMEMSET(&srvAddr, 0, sizeof(srvAddr));
 
-    /* converts IPv4 addresses from text to binary form */
-    ret = inet_pton(AF_INET, srvIp, &srvAddr);
-    if (ret != 1) {
-        printf("inet_pton error %d\n", ret);
-        return -1;
+    if (argc > 1) {
+        /* parse server IP */
+        srvIp = argv[1];
+
+        /* converts IPv4 addresses from text to binary form */
+        ret = inet_pton(AF_INET, srvIp, &srvAddr);
+        if (ret != 1) {
+            printf("inet_pton error %d\n", ret);
+            return -1;
+        }
     }
 
 #if defined(DEBUG_WOLFSSL)
@@ -30,6 +32,11 @@ int main(int argc, char **argv)
 #endif
 
     wolfSSL_Init();  /* initialize wolfSSL */
+
+    ret = KeyClient_FindMaster(&srvAddr, heap);
+    if (ret != 0) {
+        printf("unable to find master %d\n", ret);
+    }
 
     ret = KeyClient_GetKey(&srvAddr, &keyResp, heap);
 
