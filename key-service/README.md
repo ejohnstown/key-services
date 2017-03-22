@@ -1,8 +1,8 @@
-# TLS-PSK Key Client/Server for Cummins
+# TLS-PSK Key Client/Server
 
 ## Overview
 
-The purpose of this project is to provide a way for Cummins devices to acquire their Pre-Master-Secret for Multicast DTLS. When a device comes online one is elected master and made the Key Server. The remainder become Key Clients and connect to the master to acquire the PMS.
+The purpose of this project is to provide a way for devices to acquire their Pre-Master-Secret for Multicast DTLS. When a device comes online one is elected master and made the Key Server. The remainder become Key Clients and connect to the master to acquire the PMS.
 
 The PMS will be randomly generated on server startup. The size of the PMS is 48 bytes (2 byte header and 46 RNG bytes).
 
