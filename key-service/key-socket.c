@@ -451,7 +451,10 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
     unsigned int ret;
     int error = 0;
 
-    ret = nx_udp_socket_receive(sockFd, &nxPacket, NX_NO_WAIT);
+    /* NetX uses two different types for UDP and TCP sockets. We wrap the NetX
+     * sockets as NX_TCP_SOCKET pointers, but need to typecast it back to
+     * NX_UDP_SOCKET here. */
+    ret = nx_udp_socket_receive((NX_UDP_SOCKET*)sockFd, &nxPacket, NX_NO_WAIT);
     if (ret != NX_SUCCESS)
         error = 1;
     }
@@ -485,6 +488,33 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         }
     }
 
+    if (!error) {
+        if (addr != NULL && addrSz != NULL &&
+            *addrSz >= sizeof(struct sockaddr_in)) {
+
+            ULONG a;
+            UINT p;
+
+            ret = nx_udp_source_extract(nxPacket, &a, &p);
+
+            if (ret != NX_SUCCESS) {
+                error = 1;
+            #if KEY_SOCKET_LOGGING_LEVEL >= 1
+                printf("couldn't get source address");
+            #endif
+            }
+            else {
+                struct sockaddr_in* sin;
+
+                sin = (struct sockaddr_in*)addr;
+                sin->sin_family = AF_INET;
+                sin->sin_port = p;
+                sin->sin_addr.s_addr = a;
+                *addrSz = sizeof(struct sockaddr_in);
+            }
+        }
+    }
+
     if (nxPacket != NULL) {
         ret = nx_packet_release(nxPacket);
         if (ret != NX_SUCCESS) {
@@ -508,8 +538,6 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         }
     }
 
-    (void)addr;
-    (void)addrSz;
     (void)flags;
 
 #else
