@@ -24,6 +24,7 @@
 #include <wolfssl/wolfcrypt/memory.h>
 #include "wolfcast.h"
 #include "key-services.h"
+#include "key-beacon.h"
 
 
 #ifndef NETX
@@ -58,15 +59,11 @@
 
     #define GROUP_ADDR "226.0.0.3"
     #define GROUP_PORT 12345
+    #define BEACON_PORT 22222
 
     #ifndef LOCAL_ADDR
         #define LOCAL_ADDR "192.168.0.111"
     #endif
-    #ifndef KEY_ADDR
-        #define KEY_ADDR   "192.168.0.111"
-    #endif
-
-    static struct in_addr keySrvAddr;
 
 
 static int
@@ -122,9 +119,6 @@ CreateSockets(SocketInfo_t* si, int isClient)
         WCERR("no socket info");
     }
 
-    memset(&keySrvAddr, 0, sizeof(keySrvAddr));
-    keySrvAddr.s_addr = inet_addr(KEY_ADDR);
-
     if (!error) {
         si->tx.sin_family = AF_INET;
         si->tx.sin_addr.s_addr = inet_addr(GROUP_ADDR);
@@ -160,11 +154,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
         struct in_addr addr;
 
         memset(&addr, 0, sizeof(addr));
-#ifndef LOCAL_ADDR
-        addr.s_addr = htonl(INADDR_ANY);
-#else
         addr.s_addr = inet_addr(LOCAL_ADDR);
-#endif
 
         if (setsockopt(si->txFd, IPPROTO_IP, IP_MULTICAST_IF,
                     (const void*)&addr, sizeof(addr)) != 0) {
@@ -271,6 +261,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     #define GROUP_ADDR 0xE2000003
     #define GROUP_PORT 12345
+    #define BEACON_PORT 22222
 
     static struct in_addr keySrvAddr = { IP_ADDRESS(192,168,2,1) };
     static int hasKey = 0;
@@ -979,6 +970,63 @@ WolfcastServer(WOLFSSL *ssl)
 
 #ifndef NO_MAIN_DRIVER
 
+
+static void *
+KeyBeaconThread(void *ignore)
+{
+    KeyBeacon_Handle_t *h;
+    KS_SOCKET_T s = KS_SOCKET_T_INIT;
+    int error = 0;
+
+    (void)ignore;
+
+    h = KeyBeacon_GetGlobalHandle();
+    if (h == NULL) {
+        error = 1;
+        WCERR("KeyBeacon thread couldn't get global handle.");
+    }
+
+    if (!error) {
+        struct sockaddr_in myAddr;
+        int ret;
+
+        memset(&myAddr, 0, sizeof(myAddr));
+        myAddr.sin_family = AF_INET;
+        myAddr.sin_port = SERV_PORT; /* Key service port number. */
+        myAddr.sin_addr.s_addr = inet_addr(LOCAL_ADDR);
+
+        ret = KeySocket_CreateUdpSocket(&s);
+        if (ret != 0) {
+            error = 1;
+        }
+
+        if (!error) {
+            ret = KeySocket_Bind(s, &myAddr.sin_addr, myAddr.sin_port);
+            if (ret != 0) {
+                error= 1;
+            }
+        }
+
+        if (!error)
+            error = KeyBeacon_SetSocket(h, s, (struct sockaddr *)&myAddr);
+
+        if (error) {
+            WCERR("KeyBeacon thread couldn't set the socket.");
+        }
+    }
+
+    while (!error) {
+        error = KeyBeacon_Handler(h);
+    }
+
+    if (error) {
+        WCERR("KeyBeacon handler cannot run.");
+    }
+
+    return NULL;
+}
+
+
 #define PEER_ID_LIST_SZ 99
 
 int
@@ -996,6 +1044,10 @@ main(
     WOLFSSL *curSsl = NULL;
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
+    struct in_addr keySrvAddr;
+    KeyBeacon_Handle_t *beacon;
+
+    memset(&keySrvAddr, 0, sizeof(keySrvAddr));
 
     if (argc == 3 || argc == 4) {
         long n;
@@ -1059,8 +1111,27 @@ main(
                  "       wolfcast server <id>\n");
     }
 
-    if (!error)
+    if (!error) {
+        beacon = KeyBeacon_GetGlobalHandle();
+        if (beacon == NULL) {
+            error = 1;
+            WCERR("Couldn't get the key beacon handle.");
+        }
+    }
+
+    if (!error) {
+        error = KeyBeacon_Init(beacon);
+        if (error) {
+            WCERR("Couldn't initialize key beacon.");
+        }
+    }
+
+    if (!error) {
         error = WolfcastInit(isClient, myId, &ctx, &si);
+        if (error) {
+            WCERR("Couldn't initialize wolfCast.");
+        }
+    }
 
     if (isClient) {
 #ifndef NO_WOLFCAST_CLIENT
@@ -1075,6 +1146,25 @@ main(
             fd_set readfds;
             struct timeval timeout = {0, 500000};
 
+            ret = KeyClient_FindMaster(&keySrvAddr, NULL);
+            if (ret != 0) {
+                error = 1;
+                WCERR("unable to find master");
+            }
+
+            if (!error) {
+                do {
+                    ret = KeyBeacon_GetMaster(beacon, &keySrvAddr);
+                    if (ret ==  KB_FM_WAITING)
+                        sleep(1);
+                } while (ret == KB_FM_WAITING);
+
+                if (ret == KB_FM_FAILED) {
+                    error = 1;
+                    WCERR("unable to get master address");
+                }
+            }
+
             if (iteration == 0) {
                 WOLFSSL *newSsl;
                 KeyRespPacket_t keyResp;
@@ -1082,12 +1172,6 @@ main(
                 unsigned short newEpoch;
 
                 iteration = 20;
-
-                result = KeyClient_FindMaster(&keySrvAddr, NULL);
-                if (result != 0) {
-                    error = 1;
-                    WCERR("unable to find master");
-                }
 
                 if (!error) {
                     result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
@@ -1161,6 +1245,22 @@ main(
             KeyRespPacket_t keyResp;
             int result;
             unsigned short newEpoch;
+
+            if (!error) {
+                result = KeyBeacon_AllowFloatingMaster(beacon, 1);
+                if (result != 0) {
+                    error = 1;
+                    WCERR("Couldn't allow floating master.");
+                }
+            }
+
+            if (!error) {
+                result = KeyBeacon_FloatingMaster(beacon, 1);
+                if (result != 0) {
+                    error = 1;
+                    WCERR("Couldn't assert floating master.");
+                }
+            }
 
             result = KeyClient_FindMaster(&keySrvAddr, NULL);
             if (result != 0) {
