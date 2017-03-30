@@ -271,8 +271,11 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
         printf("Sending message\n");
         recvd = KeySocket_SendTo(h->socket, buf, 1, 0,
                                  &h->groupAddr, sizeof(h->groupAddr));
-        error = errno;
-        printf("Message %d\n", error);
+        if (recvd <= 0) {
+            error = 1;
+            recvd = errno;
+            printf("Message error %d\n", error);
+        }
     }
 
     return error;

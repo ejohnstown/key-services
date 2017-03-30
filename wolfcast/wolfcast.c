@@ -977,6 +977,7 @@ KeyBeaconThreadEntry(void *ignore)
     KeyBeacon_Handle_t *h;
     KS_SOCKET_T s = KS_SOCKET_T_INIT;
     int error = 0;
+    unsigned short port = SERV_PORT;
 
     (void)ignore;
 
@@ -987,15 +988,15 @@ KeyBeaconThreadEntry(void *ignore)
     }
 
     if (!error) {
-        struct sockaddr_in groupAddr;
+        struct sockaddr_in bcAddr;
         struct in_addr myAddr;
         int ret;
 
-        memset(&groupAddr, 0, sizeof(groupAddr));
+        memset(&bcAddr, 0, sizeof(bcAddr));
         memset(&myAddr, 0, sizeof(myAddr));
-        groupAddr.sin_family = AF_INET;
-        groupAddr.sin_port = SERV_PORT; /* Key service port number. */
-        groupAddr.sin_addr.s_addr = inet_addr(GROUP_ADDR);
+        bcAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
+        bcAddr.sin_family = AF_INET;
+        bcAddr.sin_port = htons(SERV_PORT);
         myAddr.s_addr = inet_addr(LOCAL_ADDR);
 
         ret = KeySocket_CreateUdpSocket(&s);
@@ -1004,7 +1005,7 @@ KeyBeaconThreadEntry(void *ignore)
         }
 
         if (!error) {
-            ret = KeySocket_Bind(s, &groupAddr.sin_addr, groupAddr.sin_port);
+            ret = KeySocket_Bind(s, &myAddr, ntohs(bcAddr.sin_port));
             if (ret != 0) {
                 error = 1;
                 WCERR("Cannot bind the key beacon socket.");
@@ -1012,6 +1013,12 @@ KeyBeaconThreadEntry(void *ignore)
         }
 
         if (!error) {
+            int enabled = 1;
+
+    /* enable broadcast */
+    KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST,
+        &enabled, sizeof(enabled));
+
             ret = KeySocket_SetNonBlocking(s);
             if (ret != 0) {
                 error = 1;
@@ -1021,7 +1028,7 @@ KeyBeaconThreadEntry(void *ignore)
 
         if (!error) {
             error = KeyBeacon_SetSocket(h, s,
-                                        (struct sockaddr *)&groupAddr,
+                                        (struct sockaddr *)&bcAddr,
                                         &myAddr);
             if (error) {
                 WCERR("KeyBeacon thread couldn't set the socket.");

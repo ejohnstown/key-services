@@ -16,19 +16,21 @@ static void* KeyServerUdpThread(void* arg)
     int error = 0;
     struct sockaddr_in groupAddr;
     struct in_addr myAddr;
+    int enabled = 1;
     (void)arg;
 
     memset(&groupAddr, 0, sizeof(groupAddr));
     memset(&myAddr, 0, sizeof(myAddr));
     
     groupAddr.sin_family = AF_INET;
-    groupAddr.sin_port = SERV_PORT;
-    groupAddr.sin_addr.s_addr = inet_addr("226.0.0.3");
+    groupAddr.sin_port = htons(SERV_PORT);
+    groupAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
     myAddr.s_addr = inet_addr("192.168.2.1");
 
     KeySocket_CreateUdpSocket(&s);
     KeySocket_Bind(s, &myAddr, SERV_PORT);
-
+    KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST,
+        &enabled, sizeof(enabled));
     h = KeyBeacon_GetGlobalHandle();
     KeyBeacon_Init(h);
     KeyBeacon_AllowFloatingMaster(h, 1);
