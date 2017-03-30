@@ -972,7 +972,7 @@ WolfcastServer(WOLFSSL *ssl)
 
 
 static void *
-KeyBeaconThread(void *ignore)
+KeyBeaconThreadEntry(void *ignore)
 {
     KeyBeacon_Handle_t *h;
     KS_SOCKET_T s = KS_SOCKET_T_INIT;
@@ -987,13 +987,16 @@ KeyBeaconThread(void *ignore)
     }
 
     if (!error) {
-        struct sockaddr_in myAddr;
+        struct sockaddr_in groupAddr;
+        struct in_addr myAddr;
         int ret;
 
+        memset(&groupAddr, 0, sizeof(groupAddr));
         memset(&myAddr, 0, sizeof(myAddr));
-        myAddr.sin_family = AF_INET;
-        myAddr.sin_port = SERV_PORT; /* Key service port number. */
-        myAddr.sin_addr.s_addr = inet_addr(LOCAL_ADDR);
+        groupAddr.sin_family = AF_INET;
+        groupAddr.sin_port = SERV_PORT; /* Key service port number. */
+        groupAddr.sin_addr.s_addr = inet_addr(GROUP_ADDR);
+        myAddr.s_addr = inet_addr(LOCAL_ADDR);
 
         ret = KeySocket_CreateUdpSocket(&s);
         if (ret != 0) {
@@ -1001,22 +1004,49 @@ KeyBeaconThread(void *ignore)
         }
 
         if (!error) {
-            ret = KeySocket_Bind(s, &myAddr.sin_addr, myAddr.sin_port);
+            ret = KeySocket_Bind(s, &groupAddr.sin_addr, groupAddr.sin_port);
             if (ret != 0) {
-                error= 1;
+                error = 1;
+                WCERR("Cannot bind the key beacon socket.");
             }
         }
 
-        if (!error)
-            error = KeyBeacon_SetSocket(h, s, (struct sockaddr *)&myAddr);
+        if (!error) {
+            ret = KeySocket_SetNonBlocking(s);
+            if (ret != 0) {
+                error = 1;
+                WCERR("Cannot set beacon socket to non-blocking.");
+            }
+        }
 
-        if (error) {
-            WCERR("KeyBeacon thread couldn't set the socket.");
+        if (!error) {
+            error = KeyBeacon_SetSocket(h, s,
+                                        (struct sockaddr *)&groupAddr,
+                                        &myAddr);
+            if (error) {
+                WCERR("KeyBeacon thread couldn't set the socket.");
+            }
+        }
+
+        if (!error) {
+            error = KeyBeacon_FloatingMaster(h, 0);
+            if (error) {
+                printf("Couldn't disable floating master\n");
+            }
+        }
+
+        if (!error) {
+            error = KeyBeacon_FindMaster(h);
+            if (error) {
+                WCERR("KeyBeacon thread can't find the master.");
+            }
         }
     }
 
     while (!error) {
         error = KeyBeacon_Handler(h);
+        printf("Key Beacon handler sleeping\n");
+        sleep(1);
     }
 
     if (error) {
@@ -1035,6 +1065,7 @@ main(
     char** argv)
 {
     int error = 0;
+    int ret;
     int isClient = 0;
     unsigned short myId;
     unsigned short peerIdList[PEER_ID_LIST_SZ];
@@ -1045,6 +1076,7 @@ main(
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
     struct in_addr keySrvAddr;
+    pthread_t beaconThread;
     KeyBeacon_Handle_t *beacon;
 
     memset(&keySrvAddr, 0, sizeof(keySrvAddr));
@@ -1127,6 +1159,37 @@ main(
     }
 
     if (!error) {
+        if (pthread_create(&beaconThread, NULL,
+                           KeyBeaconThreadEntry, NULL) != 0) {
+            error = 1;
+            WCERR("Couldn't spin up the key beacon thread.");
+        }
+    }
+
+    if (!error) {
+        ret = KeyBeacon_FindMaster(beacon);
+        if (ret != 0) {
+            error = 1;
+            WCERR("Couldn't try to find the master.\n");
+        }
+    }
+
+    if (!error) {
+        do {
+            ret = KeyBeacon_GetMaster(beacon, &keySrvAddr);
+            if (ret == KB_FM_WAITING) {
+                printf("Get Master address sleeping.\n");
+                sleep(1);
+            }
+        } while (ret == KB_FM_WAITING);
+
+        if (ret != 0) {
+            error = 1;
+            WCERR("Couldn't get the master address.");
+        }
+    }
+
+    if (!error) {
         error = WolfcastInit(isClient, myId, &ctx, &si);
         if (error) {
             WCERR("Couldn't initialize wolfCast.");
@@ -1142,7 +1205,6 @@ main(
             error = WolfcastClientInit(&txtime, &count);
 
         while (!error) {
-            int ret;
             fd_set readfds;
             struct timeval timeout = {0, 500000};
 
@@ -1168,14 +1230,13 @@ main(
             if (iteration == 0) {
                 WOLFSSL *newSsl;
                 KeyRespPacket_t keyResp;
-                int result;
                 unsigned short newEpoch;
 
                 iteration = 20;
 
                 if (!error) {
-                    result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
-                    if (result != 0) {
+                    ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+                    if (ret != 0) {
                         error = 1;
                         WCERR("Key retrieval failed");
                     }
@@ -1193,12 +1254,12 @@ main(
                 if (!error) {
                     newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
                     WCPRINTF("key set newEpoch = %u\n", newEpoch);
-                    result = wolfSSL_set_secret(newSsl, newEpoch,
-                                    keyResp.pms, sizeof(keyResp.pms),
-                                    keyResp.clientRandom,
+                    ret = wolfSSL_set_secret(newSsl, newEpoch,
+                                             keyResp.pms, sizeof(keyResp.pms),
+                                             keyResp.clientRandom,
                                     keyResp.serverRandom,
                                     keyResp.suite);
-                    if (result != SSL_SUCCESS) {
+                    if (ret != SSL_SUCCESS) {
                         error = 1;
                         WCERR("Couldn't set the session secret");
                     }
@@ -1243,34 +1304,11 @@ main(
         {
             WOLFSSL *newSsl;
             KeyRespPacket_t keyResp;
-            int result;
             unsigned short newEpoch;
 
             if (!error) {
-                result = KeyBeacon_AllowFloatingMaster(beacon, 1);
-                if (result != 0) {
-                    error = 1;
-                    WCERR("Couldn't allow floating master.");
-                }
-            }
-
-            if (!error) {
-                result = KeyBeacon_FloatingMaster(beacon, 1);
-                if (result != 0) {
-                    error = 1;
-                    WCERR("Couldn't assert floating master.");
-                }
-            }
-
-            result = KeyClient_FindMaster(&keySrvAddr, NULL);
-            if (result != 0) {
-                error = 1;
-                WCERR("unable to find master");
-            }
-
-            if (!error) {
-                result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
-                if (result != 0) {
+                ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+                if (ret != 0) {
                     error = 1;
                     WCERR("Key retrieval failed");
                 }
@@ -1286,11 +1324,11 @@ main(
 
             if (!error) {
                 newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
-                result = wolfSSL_set_secret(newSsl, newEpoch,
+                ret = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyResp.pms, sizeof(keyResp.pms),
                                 keyResp.clientRandom, keyResp.serverRandom,
                                 keyResp.suite);
-                if (result != SSL_SUCCESS) {
+                if (ret != SSL_SUCCESS) {
                     error = 1;
                     WCERR("Couldn't set the session secret");
                 }

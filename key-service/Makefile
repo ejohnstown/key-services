@@ -1,5 +1,5 @@
 LIB_PATH=/usr/local
-CFLAGS=-Wall -I$(LIB_PATH)/include -I../wolfcast
+CFLAGS=-Wall -I$(LIB_PATH)/include -I../wolfcast -DKEY_SERVER_LOCAL_IP="192,168,2,1"
 DEBUG_CFLAGS=
 NETX_CFLAGS=
 
@@ -26,13 +26,13 @@ CFLAGS+=$(NETX_CFLAGS) $(DEBUG_CFLAGS)
 
 all: mcastpeer key-client key-server
 
-mcastpeer: mcastpeer.o key-services.o key-socket.o
+mcastpeer: mcastpeer.o key-services.o key-socket.o key-beacon.o
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
-key-client: key-client.o key-services.o key-socket.o
+key-client: key-client.o key-services.o key-socket.o key-beacon.o
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
-key-server: key-server.o key-services.o key-socket.o
+key-server: key-server.o key-services.o key-socket.o key-beacon.o
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
 .PHONY: clean all

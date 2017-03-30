@@ -1,6 +1,7 @@
 #include "benchmark.h"
 #include "wolftest.h"
 #include "key-services.h"
+#include "key-beacon.h"
 #include "wolfcast.h"
 #include "key.h"
 
@@ -11,8 +12,10 @@
 #define KS_THRESHOLD 15
 #define KS_MEMORY_POOL_SZ KS_STACK_SZ
 
-#define KS_TIMEOUT_1SEC 100
+#define KS_TIMEOUT_1TICK 1
+#define KS_TIMEOUT_1SEC (KS_TIMEOUT_1TICK * 100)
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
+#define KS_TIMEOUT_KEY_BEACON (KS_TIMEOUT_1TICK * 10)
 #define KS_TIMEOUT_KEY_CLIENT KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_SERVER KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_WOLFCAST_KEY_POLL KS_TIMEOUT_1SEC
@@ -35,10 +38,12 @@
  * named "result". Return codes for ThreadX/NetX are of type UINT
  * and typically named "status". */
 
+static TX_THREAD gKeyBeaconThread;
 static TX_THREAD gKeyServerThread;
 static TX_THREAD gKeyClientThread;
 static TX_THREAD gWolfCastClientThread;
 
+static char gKeyBeaconStack[KS_STACK_SZ];
 static char gKeyServerStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[KS_STACK_SZ];
@@ -74,6 +79,30 @@ static int isNetworkReady(ULONG timeout)
     }
 
     return isReady;
+}
+
+
+/* KeyBeaconEntry
+ * Thread entry point to drive the key beacon. This thread owns
+ * the socket for the key beacon. */
+static void
+KeyBeaconEntry(ULONG ignore)
+{
+    KeyBeacon_Handle_t *h;
+    int error;
+
+    (void)ignore;
+
+    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+        KS_PRINTF("Key Service client waiting for network.\n");
+    }
+
+    h = KeyBeacon_GetGlobalHandle();
+
+    while (1) {
+        tx_thread_sleep(KS_TIMEOUT_KEY_BEACON);
+        error = KeyBeacon_Handler(h);
+    }
 }
 
 
@@ -299,6 +328,21 @@ WolfLocalInit(void)
 
     if (KeySocket_Init() != 0) {
         KS_PRINTF("couldn't initialize the KeySocket\n");
+        return;
+    }
+
+    if (KeyBeacon_Init() != 0) {
+        KS_PRINTF("couldn't initialize the KeyBeacon\n");
+        return;
+    }
+
+    status = tx_thread_create(&gKeyBeaconThread, "key service beacon",
+                           KeyBeaconEntry, 0,
+                           gKeyBeaconStack, sizeof(gKeyBeaconStack),
+                           KS_PRIORITY, KS_THRESHOLD,
+                           TX_NO_TIME_SLICE, TX_AUTO_START);
+    if (status != TX_SUCCESS) {
+        KS_PRINTF("key %s thread create failed = 0x%02X\n", "beacon", status);
         return;
     }
 

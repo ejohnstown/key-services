@@ -29,7 +29,8 @@ KeyBeacon_Handle_t *KeyBeacon_GetGlobalHandle(void);
 int KeyBeacon_Handler(KeyBeacon_Handle_t*);
 
 int KeyBeacon_Init(KeyBeacon_Handle_t*);
-int KeyBeacon_SetSocket(KeyBeacon_Handle_t*, KS_SOCKET_T, struct sockaddr*);
+int KeyBeacon_SetSocket(KeyBeacon_Handle_t*, KS_SOCKET_T,
+                        struct sockaddr*, struct in_addr*);
 int KeyBeacon_AllowFloatingMaster(KeyBeacon_Handle_t*, int);
 int KeyBeacon_FloatingMaster(KeyBeacon_Handle_t*, int);
 

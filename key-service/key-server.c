@@ -1,4 +1,5 @@
 #include "key-services.h"
+#include "key-beacon.h"
 
 #ifndef NETX
     /* additional *nix headers needed for threading, select and time */
@@ -10,8 +11,35 @@
 #ifndef NETX
 static void* KeyServerUdpThread(void* arg)
 {
-    void* heap = arg;
-    KeyServer_RunUdp(heap);
+    KeyBeacon_Handle_t *h;
+    KS_SOCKET_T s = KS_SOCKET_T_INIT;
+    int error = 0;
+    struct sockaddr_in groupAddr;
+    struct in_addr myAddr;
+    (void)arg;
+
+    memset(&groupAddr, 0, sizeof(groupAddr));
+    memset(&myAddr, 0, sizeof(myAddr));
+    
+    groupAddr.sin_family = AF_INET;
+    groupAddr.sin_port = SERV_PORT;
+    groupAddr.sin_addr.s_addr = inet_addr("226.0.0.3");
+    myAddr.s_addr = inet_addr("192.168.2.1");
+
+    KeySocket_CreateUdpSocket(&s);
+    KeySocket_Bind(s, &myAddr, SERV_PORT);
+
+    h = KeyBeacon_GetGlobalHandle();
+    KeyBeacon_Init(h);
+    KeyBeacon_AllowFloatingMaster(h, 1);
+    KeyBeacon_FloatingMaster(h, 1);
+    KeyBeacon_SetSocket(h, s, (struct sockaddr*)&groupAddr, &myAddr);
+
+    while (!error) {
+        error = KeyBeacon_Handler(h);
+        sleep(1);
+    }
+
     return NULL;
 }
 #endif

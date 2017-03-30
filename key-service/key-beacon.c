@@ -18,18 +18,14 @@ typedef enum KeyBeacon_State_t {
 struct KeyBeacon_Handle_t {
     wolfSSL_Mutex mutex;
     KS_SOCKET_T socket;
-    KS_SOCKET_T socketReq;
     KeyBeacon_State_t state;
-    KeyBeacon_State_t stateReq;
     int fmAllowed; /* This KeyBeacon is allowed to become floating master */
-    int fmAllowedReq; /* request change to being able to be floating master */
     int fmKnown; /* floating master location known */
     int fmReq;   /* request to find the master */
     struct in_addr fmAddr; /* floating master's address */
+    struct in_addr myAddr; /* This peer's address */
     struct sockaddr groupAddr; /* key beacon group address */
-    struct sockaddr groupAddrReq;
     unsigned short port;
-    unsigned short portReq;
 };
 
 
@@ -66,9 +62,8 @@ int KeyBeacon_Init(KeyBeacon_Handle_t *h)
 
     if (!error) {
         h->state = KBS_init;
-        h->stateReq = KBS_client;
         h->fmAllowed = KB_FM_NOTALLOWED;
-        h->fmAllowedReq = KB_FM_NOTALLOWED;
+        h->socket = KS_SOCKET_T_INIT;
     }
 
     return error;
@@ -107,8 +102,8 @@ int KeyBeacon_AllowFloatingMaster(KeyBeacon_Handle_t* h, int allow)
     }
 
     if (!error) {
-        h->fmAllowedReq = (allow == KB_FM_NOTALLOWED) ?
-                              KB_FM_NOTALLOWED : KB_FM_ALLOWED;
+        h->fmAllowed = (allow == KB_FM_NOTALLOWED) ?
+                       KB_FM_NOTALLOWED : KB_FM_ALLOWED;
     }
 
     if (locked)
@@ -122,12 +117,12 @@ int KeyBeacon_AllowFloatingMaster(KeyBeacon_Handle_t* h, int allow)
  * Sets the socket for the beacon. While the beacon will handle reads and
  * writes, the owner should control the socket. */
 int KeyBeacon_SetSocket(KeyBeacon_Handle_t* h, KS_SOCKET_T socket,
-                        struct sockaddr* addr)
+                        struct sockaddr* groupAddr, struct in_addr* myAddr)
 {
     int error = 0;
     int locked = 0;
 
-    if (h == NULL || socket == 0) {
+    if (h == NULL || socket == 0 || groupAddr == NULL || myAddr == NULL) {
         KB_PRINTF("KeyBeacon_SetSocket: invalid parameters\n");
         error = 1;
     }
@@ -142,9 +137,10 @@ int KeyBeacon_SetSocket(KeyBeacon_Handle_t* h, KS_SOCKET_T socket,
     }
 
     if (!error) {
-        h->socketReq = socket;
-        h->portReq = ((struct sockaddr_in*)addr)->sin_port;
-        memcpy(&h->groupAddrReq, addr, sizeof(h->groupAddrReq));
+        h->socket = socket;
+        h->port = ((struct sockaddr_in*)groupAddr)->sin_port;
+        memcpy(&h->groupAddr, groupAddr, sizeof(h->groupAddr));
+        memcpy(&h->myAddr, myAddr, sizeof(h->myAddr));
     }
 
     if (locked)
@@ -180,8 +176,10 @@ int KeyBeacon_FloatingMaster(KeyBeacon_Handle_t* h, int fm)
     }
 
     if (!error) {
-        if (h->fmAllowed) {
-            h->stateReq = (fm == KB_FM_RELEASE) ? KBS_client : KBS_master;
+        if (fm == KB_FM_RELEASE)
+            h->state = KBS_client;
+        else if (h->fmAllowed) {
+            h->state = KBS_master;
         }
         else {
             #if KEY_BEACON_LOGGING_LEVEL >= 1
@@ -215,15 +213,21 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
     socklen_t addrSz;
 
     /* Read from the socket and wait for a packet. */
-    recvd = KeySocket_RecvFrom(h->socket,
-                               buf, sizeof(buf), 0,
-                               (struct sockaddr*)&addr, &addrSz);
+    if (h->socket != KS_SOCKET_T_INIT) {
+        recvd = KeySocket_RecvFrom(h->socket,
+                                   buf, sizeof(buf), 0,
+                                   (struct sockaddr*)&addr, &addrSz);
+    }
+    else
+        recvd = WOLFSSL_CBIO_ERR_WANT_READ;
 
     if (recvd == WOLFSSL_CBIO_ERR_WANT_READ) {
+        printf("Want read\n");
         /* Try again later */
     }
     else if (recvd != 1) {
         /* Error */
+        printf("Read had hard failure\n");
         error = 1;
     }
 
@@ -234,52 +238,19 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
     else
         locked = 1;
 
-    /* Update internal state accordingly. */
-    if (!error) {
-        if (h->fmAllowedReq != h->fmAllowed) {
-            h->fmAllowed = h->fmAllowedReq;
-            /* If the key beacon is current in master mode, and floating master
-             * is being disallowed, request switch to client. */
-            if (!h->fmAllowed && h->state == KBS_master)
-                h->stateReq = KBS_client;
-        }
-
-        if (h->stateReq != h->state) {
-            if (h->stateReq == KBS_client) {
-                if (h->state == KBS_master) {
-                    h->state = KBS_client;
-                }
-            }
-            else {
-                if (h->state != KBS_master) {
-                    h->state = KBS_master;
-                }
-            }
-        }
-
-        if (h->socketReq != h->socket)
-            h->socket = h->socketReq;
-
-        if (h->portReq != h->port)
-            h->port = h->portReq;
-
-        if (memcmp(&h->groupAddr, &h->groupAddrReq,
-                   sizeof(struct sockaddr)) != 0) {
-
-            memcpy(&h->groupAddr, &h->groupAddrReq, sizeof(h->groupAddr));
-        }
-    }
-
     /* Respond as appropriate */
     if (!error) {
         if (h->state == KBS_master) {
+            printf("State: master\n");
             if ((int)buf[0] == KB_MSGID_WHOISFM) {
                 buf[0] = KB_MSGID_IAMFM;
                 sendMsg = 1;
             }
         }
         else if (h->state == KBS_client) {
+            printf("State: client\n");
             if (h->fmReq) {
+                printf("Attempting to send WHOIS\n");
                 buf[0] = KB_MSGID_WHOISFM;
                 sendMsg = 1;
             }
@@ -288,6 +259,8 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
                 h->fmKnown = 1;
             }
         }
+        else
+            printf("Some other state\n");
     }
 
     if (locked)
@@ -295,8 +268,11 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
 
     if (sendMsg) {
         /* Send the packet. */
-        KeySocket_SendTo(h->socket, buf, 1, 0,
-                         &h->groupAddr, sizeof(h->groupAddr));
+        printf("Sending message\n");
+        recvd = KeySocket_SendTo(h->socket, buf, 1, 0,
+                                 &h->groupAddr, sizeof(h->groupAddr));
+        error = errno;
+        printf("Message %d\n", error);
     }
 
     return error;
@@ -364,8 +340,10 @@ int KeyBeacon_GetMaster(KeyBeacon_Handle_t *h, struct in_addr *addr)
     }
 
     if (!error) {
-        if (h->fmKnown) {
-            memcpy(addr, &h->fmAddr, sizeof(struct in_addr));
+        if (h->state == KBS_master) {
+            memcpy(addr, &h->myAddr, sizeof(h->myAddr));
+        } else if (h->fmKnown) {
+            memcpy(addr, &h->fmAddr, sizeof(h->fmAddr));
         }
         else
             error = KB_FM_WAITING;

@@ -542,6 +542,17 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
 
 #else
     recvd = (int)recvfrom(sockFd, buf, sz, flags, addr, addrSz);
+    if (recvd == -1) {
+        recvd = errno;
+        if (recvd == EAGAIN)
+            recvd = WOLFSSL_CBIO_ERR_WANT_READ;
+        else {
+        #if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("recvfrom error: %d\n", recvd);
+        #endif
+            recvd = WOLFSSL_CBIO_ERR_GENERAL;
+        }
+    }
 #endif
 
     return recvd;
