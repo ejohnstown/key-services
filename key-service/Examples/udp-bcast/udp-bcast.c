@@ -71,6 +71,7 @@ int main(int argc, char** argv)
     int sockfd, ret, on = 1;
     struct sockaddr_in receive;
     socklen_t receive_len = sizeof(receive);
+    pthread_t tid;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -91,14 +92,6 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-
-    struct ip_mreq imreq;
-    memset(&imreq, 0, sizeof(imreq));
-
-    imreq.imr_multiaddr.s_addr = inet_addr(BCAST_ADDR);
-    imreq.imr_interface.s_addr = INADDR_ANY;
-
-    pthread_t tid;
     if (pthread_create(&tid, NULL, SendMsgThread, NULL) < 0) {
         perror("pthread_create failed");
         exit(EXIT_FAILURE);
