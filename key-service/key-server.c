@@ -37,7 +37,6 @@ printf("KeyServerUdpThread...\n");
     KeyBeacon_AllowFloatingMaster(h, 1);
     KeyBeacon_FloatingMaster(h, 1);
     KeyBeacon_SetSocket(h, s, (struct sockaddr*)&groupAddr, &myAddr);
-KeyBeacon_FindMaster(h);
 printf("about to loop forever\n");
     while (!error) {
         error = KeyBeacon_Handler(h);
