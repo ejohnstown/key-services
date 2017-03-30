@@ -9,7 +9,7 @@ LIBS=-lwolfssl -lm -L$(LIB_PATH)/lib
 # Static wolfSSL library with Debug
 # Build wolfSSL with Debug
 #./configure --enable-debug --disable-shared
-DEBUG_CFLAGS+=-g -DDEBUG
+DEBUG_CFLAGS+=-g3 -DDEBUG
 #LIBS=$(LIB_PATH)/lib/libwolfssl.a
 
 

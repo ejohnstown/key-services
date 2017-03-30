@@ -1,4 +1,4 @@
-CFLAGS=-I. -I../key-service
+CFLAGS=-I. -I../key-service -g3 -DDEBUG
 LDFLAGS=-lwolfssl
 CPPFLAGS=-DKEY_ADDR=\"192.168.2.1\" -DLOCAL_ADDR=\"192.168.2.1\" -DKEY_SERVER_LOCAL_IP="192,168,2,1"
 
