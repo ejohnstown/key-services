@@ -18,7 +18,7 @@ static void* KeyServerUdpThread(void* arg)
     struct in_addr myAddr;
     int enabled = 1;
     (void)arg;
-
+printf("KeyServerUdpThread...\n");
     memset(&groupAddr, 0, sizeof(groupAddr));
     memset(&myAddr, 0, sizeof(myAddr));
     
@@ -31,14 +31,17 @@ static void* KeyServerUdpThread(void* arg)
     KeySocket_Bind(s, &myAddr, SERV_PORT);
     KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST,
         &enabled, sizeof(enabled));
+    KeySocket_SetNonBlocking(s);
     h = KeyBeacon_GetGlobalHandle();
     KeyBeacon_Init(h);
     KeyBeacon_AllowFloatingMaster(h, 1);
     KeyBeacon_FloatingMaster(h, 1);
     KeyBeacon_SetSocket(h, s, (struct sockaddr*)&groupAddr, &myAddr);
-
+KeyBeacon_FindMaster(h);
+printf("about to loop forever\n");
     while (!error) {
         error = KeyBeacon_Handler(h);
+        printf("Sleeping\n");
         sleep(1);
     }
 
