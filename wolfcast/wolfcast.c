@@ -59,7 +59,6 @@
 
     #define GROUP_ADDR "226.0.0.3"
     #define GROUP_PORT 12345
-    #define BEACON_PORT 22222
 
     #ifndef LOCAL_ADDR
         #define LOCAL_ADDR "192.168.0.111"
@@ -261,7 +260,6 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     #define GROUP_ADDR 0xE2000003
     #define GROUP_PORT 12345
-    #define BEACON_PORT 22222
 
     static struct in_addr keySrvAddr = { IP_ADDRESS(192,168,2,1) };
     static int hasKey = 0;

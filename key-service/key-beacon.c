@@ -295,6 +295,7 @@ int KeyBeacon_FindMaster(KeyBeacon_Handle_t* h)
 {
     int error = 0;
     int locked = 0;
+    KS_SOCKET_T s = KS_SOCKET_T_INIT;
 
     if (h == NULL) {
         KB_PRINTF("KeyBeacon_FindMaster error: invalid parameter\n");
@@ -317,6 +318,77 @@ int KeyBeacon_FindMaster(KeyBeacon_Handle_t* h)
 
     if (locked)
         wc_UnLockMutex(&h->mutex);
+
+
+    if (!error) {
+        struct sockaddr_in bcAddr;
+        struct in_addr myAddr;
+        int ret;
+
+        memset(&bcAddr, 0, sizeof(bcAddr));
+        memset(&myAddr, 0, sizeof(myAddr));
+        bcAddr.sin_family = AF_INET;
+        bcAddr.sin_port = htons(BEACON_PORT);
+        bcAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        myAddr.s_addr = htonl(INADDR_ANY);
+
+        ret = KeySocket_CreateUdpSocket(&s);
+        if (ret != 0) {
+            error = 1;
+        }
+
+        if (!error) {
+            ret = KeySocket_Bind(s, &myAddr, ntohs(bcAddr.sin_port));
+            if (ret != 0) {
+                error = 1;
+                KB_PRINTF("Cannot bind the key beacon socket.");
+            }
+        }
+
+        if (!error) {
+            int enabled = 1;
+
+            /* enable broadcast */
+            KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST,
+            &enabled, sizeof(enabled));
+
+            ret = KeySocket_SetNonBlocking(s);
+            if (ret != 0) {
+                error = 1;
+                KB_PRINTF("Cannot set beacon socket to non-blocking.");
+            }
+        }
+
+        if (!error) {
+            bcAddr.sin_family = AF_INET;
+            bcAddr.sin_port = htons(BEACON_PORT);
+            bcAddr.sin_addr.s_addr = inet_addr(BEACON_BCAST_ADDR);
+            error = KeyBeacon_SetSocket(h, s,
+                                        (struct sockaddr *)&bcAddr,
+                                        &myAddr);
+            if (error) {
+                KB_PRINTF("KeyBeacon thread couldn't set the socket.");
+            }
+        }
+
+        if (!error) {
+            error = KeyBeacon_FloatingMaster(h, 0);
+            if (error) {
+                KB_PRINTF("Couldn't disable floating master\n");
+            }
+        }
+    }
+
+    while (!error) {
+        error = KeyBeacon_Handler(h);
+        KB_PRINTF("Key Beacon handler sleeping\n");
+
+        sleep(1);
+    }
+
+    if (error) {
+        KB_PRINTF("KeyBeacon handler cannot run.");
+    }
 
     return error;
 }

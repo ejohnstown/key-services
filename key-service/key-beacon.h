@@ -6,6 +6,11 @@
 #define __KEY_BEACON_H__
 
 
+#ifndef BEACON_BCAST_ADDR
+    #define BEACON_BCAST_ADDR   "192.168.0.255"
+#endif
+#define BEACON_PORT 22222
+
 typedef struct KeyBeacon_Handle_t KeyBeacon_Handle_t;
 
 

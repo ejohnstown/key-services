@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "key-socket.h"
+#include "key-beacon.h"
 
 #define PMS_SIZE       64 /* SHA256 Block size */
 #define RAND_SIZE      32

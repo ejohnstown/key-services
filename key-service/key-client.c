@@ -26,17 +26,25 @@ int main(int argc, char **argv)
             return -1;
         }
     }
+    else {
+        KeyBeacon_Handle_t *beacon;
+        byte* ip = (byte*)&srvAddr.s_addr;
+
+        printf("Finding Key Server\n");
+
+        beacon = KeyBeacon_GetGlobalHandle();
+        KeyBeacon_Init(beacon);
+        KeyBeacon_FindMaster(beacon);
+        KeyBeacon_GetMaster(beacon, &srvAddr);
+
+        printf("Found: %d.%d.%d.%d\n", ip[0], ip[1], ip[2], ip[3]);
+    }
 
 #if defined(DEBUG_WOLFSSL)
     wolfSSL_Debugging_ON();
 #endif
 
     wolfSSL_Init();  /* initialize wolfSSL */
-
-    ret = KeyClient_FindMaster(&srvAddr, heap);
-    if (ret != 0) {
-        printf("unable to find master %d\n", ret);
-    }
 
     ret = KeyClient_GetKey(&srvAddr, &keyResp, heap);
 
