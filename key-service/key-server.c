@@ -24,18 +24,22 @@ printf("KeyServerUdpThread...\n");
     
     groupAddr.sin_family = AF_INET;
     groupAddr.sin_port = htons(SERV_PORT);
-    groupAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
+    groupAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     myAddr.s_addr = inet_addr("192.168.2.1");
 
     KeySocket_CreateUdpSocket(&s);
-    KeySocket_Bind(s, &myAddr, SERV_PORT);
-    KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST,
-        &enabled, sizeof(enabled));
+    KeySocket_Bind(s, &groupAddr.sin_addr, SERV_PORT);
+    KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
     KeySocket_SetNonBlocking(s);
     h = KeyBeacon_GetGlobalHandle();
     KeyBeacon_Init(h);
     KeyBeacon_AllowFloatingMaster(h, 1);
     KeyBeacon_FloatingMaster(h, 1);
+
+    groupAddr.sin_family = AF_INET;
+    groupAddr.sin_port = htons(SERV_PORT);
+    groupAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
+
     KeyBeacon_SetSocket(h, s, (struct sockaddr*)&groupAddr, &myAddr);
 printf("about to loop forever\n");
     while (!error) {

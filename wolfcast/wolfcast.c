@@ -994,9 +994,9 @@ KeyBeaconThreadEntry(void *ignore)
 
         memset(&bcAddr, 0, sizeof(bcAddr));
         memset(&myAddr, 0, sizeof(myAddr));
-        bcAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
         bcAddr.sin_family = AF_INET;
         bcAddr.sin_port = htons(SERV_PORT);
+        bcAddr.sin_addr.s_addr = htonl(INADDR_ANY);
         myAddr.s_addr = inet_addr(LOCAL_ADDR);
 
         ret = KeySocket_CreateUdpSocket(&s);
@@ -1027,6 +1027,9 @@ KeyBeaconThreadEntry(void *ignore)
         }
 
         if (!error) {
+            bcAddr.sin_family = AF_INET;
+            bcAddr.sin_port = htons(SERV_PORT);
+            bcAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
             error = KeyBeacon_SetSocket(h, s,
                                         (struct sockaddr *)&bcAddr,
                                         &myAddr);

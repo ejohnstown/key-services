@@ -208,14 +208,15 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
     int locked = 0;
     int sendMsg = 0;
     int recvd;
-    char buf[2] = {0,0};
+    unsigned char buf[128];
     struct in_addr addr;
     socklen_t addrSz;
 
+    memset(buf, 0, sizeof(buf));
     /* Read from the socket and wait for a packet. */
     if (h->socket != KS_SOCKET_T_INIT) {
         recvd = KeySocket_RecvFrom(h->socket,
-                                   buf, sizeof(buf), 0,
+                                   (char*)buf, sizeof(buf), 0,
                                    (struct sockaddr*)&addr, &addrSz);
     }
     else
@@ -230,6 +231,9 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
         printf("Read had hard failure\n");
         error = 1;
     }
+    else {
+        printf("Got something. (%d:%02X)\n", recvd, buf[0]);
+    }
 
     if (wc_LockMutex(&h->mutex) != 0) {
         KB_PRINTF("KeyBeacon_Handler error: couldn't lock mutex\n");
@@ -242,7 +246,7 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
     if (!error) {
         if (h->state == KBS_master) {
             printf("State: master\n");
-            if ((int)buf[0] == KB_MSGID_WHOISFM) {
+            if (buf[0] == KB_MSGID_WHOISFM) {
                 buf[0] = KB_MSGID_IAMFM;
                 sendMsg = 1;
             }
@@ -254,7 +258,7 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
                 buf[0] = KB_MSGID_WHOISFM;
                 sendMsg = 1;
             }
-            if ((int)buf[0] == KB_MSGID_IAMFM) {
+            if (buf[0] == KB_MSGID_IAMFM) {
                 h->fmReq = 0;
                 h->fmKnown = 1;
             }
@@ -269,7 +273,7 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
     if (sendMsg) {
         /* Send the packet. */
         printf("Sending message\n");
-        recvd = KeySocket_SendTo(h->socket, buf, 1, 0,
+        recvd = KeySocket_SendTo(h->socket, (char*)buf, 1, 0,
                                  &h->groupAddr, sizeof(h->groupAddr));
         if (recvd <= 0) {
             error = 1;
