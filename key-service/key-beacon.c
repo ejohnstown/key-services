@@ -277,7 +277,6 @@ int KeyBeacon_Handler(KeyBeacon_Handle_t* h)
                                  &h->groupAddr, sizeof(h->groupAddr));
         if (recvd <= 0) {
             error = 1;
-            recvd = errno;
             printf("Message error %d\n", error);
         }
     }

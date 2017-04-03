@@ -9,9 +9,7 @@
 
 #define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
-#ifndef KEY_SERVER_LOCAL_IP
-    #define KEY_SERVER_LOCAL_IP 192,168,0,111
-#endif
+//#define TEST_KEY_ROLL
 
 #ifdef HAVE_NETX
     #define printf bsp_debug_printf
@@ -123,7 +121,7 @@ static int KeyReq_BuildDiscover(void)
     int ret = 0;
     const int type = CMD_PKT_TYPE_DISCOVER;
     CmdRespPacket_t* resp = &gRespPkt[type-1];
-    const unsigned char ipaddr[4] = {KEY_SERVER_LOCAL_IP};
+    const unsigned char ipaddr[4] = {KEY_SERV_LOCAL_ADDR};
     int ipaddrSz = sizeof(ipaddr);
 
     /* populate generic response packet */
@@ -144,6 +142,8 @@ static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
 {
     if (resp)
         *resp = NULL;
+    if (respLen)
+        *respLen = 0;
 
     /* check for valid type */
     if (type >= CMD_PKT_TYPE_COUNT || type <= CMD_PKT_TYPE_INVALID)
@@ -197,56 +197,11 @@ static int KeyReq_Check(CmdReqPacket_t* reqPkt)
     return ret;
 }
 
-/*
- * Handles request / response to client.
- */
-static int KeyServer_Perform(WOLFSSL* ssl)
-{
-    int ret = 0;
-    CmdReqPacket_t reqPkt;
-    unsigned char* req = (unsigned char*)&reqPkt;
-    unsigned char* resp;
-    int n;
-
-    XMEMSET(req, 0, sizeof(CmdReqPacket_t));
-    n = wolfSSL_read(ssl, req, sizeof(CmdReqPacket_t));
-    if (n > 0) {
-        /* check request */
-        ret = KeyReq_Check(&reqPkt);
-        if (ret != 0) {
-            return ret;
-        }
-
-        /* get response */
-        KeyReq_GetResp(reqPkt.header.type, &resp, &n);
-
-        /* write response */
-        if (wolfSSL_write(ssl, resp, n) != n) {
-            ret = wolfSSL_get_error(ssl, 0);
-        #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyServer_Perform: write error %d\n", ret);
-        #endif
-            return ret;
-        }
-    }
-    if (n < 0) {
-        ret = wolfSSL_get_error(ssl, 0);
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("KeyServer_Perform: read error %d\n", ret);
-    #endif
-        return ret;
-    }
-
-    return ret;
-}
-
 int KeyServer_Init(void* heap)
 {
     int ret = 0;
 
-    gKeyServerInitDone++;
-    if (gKeyServerInitDone == 1) {
-
+    if (++gKeyServerInitDone == 1) {
         gRespPkt = (CmdRespPacket_t*)XMALLOC(
                         sizeof(CmdRespPacket_t) * (CMD_PKT_TYPE_COUNT-1),
                         heap, DYNAMIC_TYPE_TMP_BUFFER);
@@ -267,9 +222,7 @@ int KeyServer_Init(void* heap)
 
 void KeyServer_Free(void* heap)
 {
-    gKeyServerInitDone--;
-    if (gKeyServerInitDone == 0) {
-
+    if (--gKeyServerInitDone == 0) {
         XFREE(gRespPkt, heap, DYNAMIC_TYPE_TMP_BUFFER);
         gRespPkt = NULL;
     }
@@ -335,38 +288,13 @@ int KeyServer_RunUdp(void* heap)
 {
     int                 ret = 0;
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
-    WOLFSSL_CTX*        ctx = NULL;
-    WOLFSSL*            ssl = NULL;
-#ifdef HAVE_NETX
-    NX_TCP_SOCKET tcpSock;
-
-    /* Extra lifting for NETX sockets */
-    listenfd = &tcpSock;
-#else
     const unsigned long inAddrAny = INADDR_ANY;
-#endif
-    int enabled = 1;
-    char peekBuffer[20];
+    int opt = 1, n;
+    CmdReqPacket_t reqPkt;
+    unsigned char* req = (unsigned char*)&reqPkt;
+    unsigned char* resp;
     struct sockaddr_in clientAddr;
     socklen_t clientAddrLen;
-
-    /* make sure key server is initialized */
-    ret = KeyServer_Init(heap);
-    if (ret != 0) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: KeyServer_Init UDP\n");
-    #endif
-        goto exit;
-    }
-
-    /* init ctx */
-    ret = KeyServer_InitCtx(&ctx, wolfDTLSv1_2_server_method_ex, heap);
-    if (ret != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: KeyServer_InitCtx UDP\n");
-    #endif
-        goto exit;
-    }
 
     /* create socket */
     ret = KeySocket_CreateUdpSocket(&listenfd);
@@ -374,12 +302,14 @@ int KeyServer_RunUdp(void* heap)
         goto exit;
     }
 
+    /* setup socket as non-blocking */
+    KeySocket_SetNonBlocking(listenfd);
+
     /* enable broadcast */
-    KeySocket_SetSockOpt(listenfd, SOL_SOCKET, SO_BROADCAST,
-        &enabled, sizeof(enabled));
+    KeySocket_SetSockOpt(listenfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
 
     /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, SERV_PORT);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_BCAST_PORT);
     if (ret != 0)
         goto exit;
 
@@ -387,52 +317,46 @@ int KeyServer_RunUdp(void* heap)
     while (gKeyServerStop == 0) {
         /* wait for client */
         clientAddrLen = sizeof(clientAddr);
-        ret = KeySocket_RecvFrom(listenfd, peekBuffer, sizeof(peekBuffer),
-            MSG_PEEK, (struct sockaddr*)&clientAddr, &clientAddrLen);
+
+        XMEMSET(req, 0, sizeof(CmdReqPacket_t));
+        ret = KeySocket_RecvFrom(listenfd, (char*)req, sizeof(CmdReqPacket_t),
+            0, (struct sockaddr*)&clientAddr, &clientAddrLen);
         if (ret > 0) {
-            ret = KeySocket_Connect(listenfd, &clientAddr.sin_addr, SERV_PORT);
-            if (ret != 0) {
-                goto exit;
-            }
-
-            /* create WOLFSSL object and respond */
-            if ((ssl = wolfSSL_new(ctx)) == NULL) {
-            #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("Error: wolfSSL_new\n");
-            #endif
-                ret = MEMORY_E; goto exit;
-            }
-
-            /* set connection context */
-        #ifdef HAVE_NETX
-            wolfSSL_SetIO_NetX(ssl, listenfd, NX_WAIT_FOREVER);
-        #else
-            ret = wolfSSL_set_fd(ssl, listenfd);
-            if (ret != SSL_SUCCESS)
-                goto exit;
+        #if KEY_SERVICE_LOGGING_LEVEL >= 2
+            unsigned char* addr = (unsigned char*)&clientAddr.sin_addr.s_addr;
+            printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
         #endif
-
-            ret = wolfSSL_accept(ssl);
-            if (ret != SSL_SUCCESS) {
+            /* check request */
+            ret = KeyReq_Check(&reqPkt);
+            if (ret != 0) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("Error: wolfSSL_accept\n");
+                printf("KeyServer_RunUdp Error: KeyReq_Check failed %d\n", ret);
             #endif
-                goto exit;
+                continue;
             }
 
-            ret = KeyServer_Perform(ssl);
-            if (ret != 0)
-                goto exit;
+            /* get response */
+            KeyReq_GetResp(reqPkt.header.type, &resp, &n);
 
-            /* closes the connections after responding */
-            wolfSSL_shutdown(ssl);
-            wolfSSL_free(ssl);
+            /* write response */
+            ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
+                (struct sockaddr*)&clientAddr, clientAddrLen);
+            if (ret != n) {
+            #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                printf("KeyServer_RunUdp Error: SendTo %d\n", ret);
+            #endif
+                continue;
+            }
+        }
+        else if (ret == WOLFSSL_CBIO_ERR_WANT_READ) {
+            /* no data (EAGAIN) */
+            sleep(1);
+            ret = 0;
         }
         else if (ret < 0) {
         #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("Error: KeySocket_RecvFrom\n");
+            printf("KeyServer_RunUdp Error: RecvFrom %d\n", ret);
         #endif
-            goto exit;
         }
     }
 
@@ -444,15 +368,9 @@ exit:
     }
 #endif
 
-    KeySocket_Unlisten(SERV_PORT);
+    KeySocket_Unlisten(KEY_BCAST_PORT);
     KeySocket_Close(&listenfd);
     KeySocket_Delete(&listenfd);
-
-    /* free up memory used by wolfSSL */
-    wolfSSL_free(ssl);
-    wolfSSL_CTX_free(ctx);
-
-    KeyServer_Free(heap);
 
     return ret;
 }
@@ -470,19 +388,15 @@ int KeyServer_Run(void* heap)
     /* Extra lifting for NETX sockets */
     listenfd = &tcpSock;
     connfd = &tcpSock;
-#else
-    const unsigned long inAddrAny = INADDR_ANY;
 #endif
+    const unsigned long inAddrAny = INADDR_ANY;
+    CmdReqPacket_t reqPkt;
+    unsigned char* req = (unsigned char*)&reqPkt;
+    unsigned char* resp;
+    int n;
+#ifdef TEST_KEY_ROLL
     int keyFlag = 0;
-
-    /* make sure key server is initialized */
-    ret = KeyServer_Init(heap);
-    if (ret != 0) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("Error: KeyServer_Init\n");
-    #endif
-        goto exit;
-    }
+#endif
 
     /* init ctx */
     ret = KeyServer_InitCtx(&ctx, wolfTLSv1_2_server_method_ex, heap);
@@ -503,9 +417,9 @@ int KeyServer_Run(void* heap)
     }
 
     /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, SERV_PORT);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_SERV_PORT);
     if (ret == 0) {
-        ret = KeySocket_Listen(listenfd, SERV_PORT, LISTENQ);
+        ret = KeySocket_Listen(listenfd, KEY_SERV_PORT, LISTENQ);
     }
     if (ret != 0)
         goto exit;
@@ -540,15 +454,45 @@ int KeyServer_Run(void* heap)
                 goto exit;
             }
 
-            ret = KeyServer_Perform(ssl);
-            if (ret != 0)
+            XMEMSET(req, 0, sizeof(CmdReqPacket_t));
+            n = wolfSSL_read(ssl, req, sizeof(CmdReqPacket_t));
+            if (n > 0) {
+                /* check request */
+                ret = KeyReq_Check(&reqPkt);
+                if (ret != 0) {
+                #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    printf("KeyServer_Run: KeyReq_Check error %d\n", ret);
+                #endif
+                    goto exit;
+                }
+
+                /* get response */
+                KeyReq_GetResp(reqPkt.header.type, &resp, &n);
+
+                /* write response */
+                if (wolfSSL_write(ssl, resp, n) != n) {
+                    ret = wolfSSL_get_error(ssl, 0);
+                #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    printf("KeyServer_Run: write error %d\n", ret);
+                #endif
+                    goto exit;
+                }
+            }
+            if (n < 0) {
+                ret = wolfSSL_get_error(ssl, 0);
+            #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                printf("KeyServer_Run: read error %d\n", ret);
+            #endif
                 goto exit;
+            }
 
             /* closes the connections after responding */
             wolfSSL_shutdown(ssl);
             wolfSSL_free(ssl);
+            ssl = NULL;
             KeySocket_Close(&connfd);
 
+        #ifdef TEST_KEY_ROLL
             /* XXX Hack to force updates. Check against 2 if adding the linux peer */
             if (keyFlag == 1) {
                 gKeyServerInitDone = 0;
@@ -558,9 +502,10 @@ int KeyServer_Run(void* heap)
             }
             else
                 keyFlag++;
+        #endif
         }
 
-        ret = KeySocket_Relisten(connfd, listenfd, SERV_PORT);
+        ret = KeySocket_Relisten(connfd, listenfd, KEY_SERV_PORT);
         if (ret != 0)
             goto exit;
     }
@@ -575,15 +520,13 @@ exit:
     }
 #endif
 
-    KeySocket_Unlisten(SERV_PORT);
+    KeySocket_Unlisten(KEY_SERV_PORT);
     KeySocket_Close(&listenfd);
     KeySocket_Delete(&listenfd);
 
     /* free up memory used by wolfSSL */
     wolfSSL_free(ssl);
     wolfSSL_CTX_free(ctx);
-
-    KeyServer_Free(heap);
 
     return ret;
 }
@@ -756,7 +699,7 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     }
 
     /* Connect to socket */
-    ret = KeySocket_Connect(sockfd, srvAddr, SERV_PORT);
+    ret = KeySocket_Connect(sockfd, srvAddr, KEY_SERV_PORT);
     if (ret != 0) {
         goto exit;
     }
@@ -814,50 +757,17 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     KS_SOCKET_T sockfd = &realSock;
 #else
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
-#ifdef WOLFSSL_STATIC_MEMORY
-    byte clientMemory[80000];
-    byte clientMemoryIO[34500];
 #endif
-#endif
-    WOLFSSL* ssl = NULL;
-    WOLFSSL_CTX* ctx = NULL;
+    CmdReqPacket_t reqPkt;
+    CmdRespPacket_t respPkt;
+    unsigned char* req = (unsigned char*)&reqPkt;
+    unsigned char* resp = (unsigned char*)&respPkt;
+    unsigned short size;
+    struct sockaddr_in clientAddr;
+    socklen_t clientAddrLen = sizeof(clientAddr);
+    int opt = 1, n;
 
     (void)heap;
-
-    /* create and initialize WOLFSSL_CTX structure for TLS 1.2 only */
-#ifndef WOLFSSL_STATIC_MEMORY
-    ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method());
-#else
-    ret = wolfSSL_CTX_load_static_memory(
-            &ctx, wolfDTLSv1_2_client_method_ex,
-            clientMemory, sizeof(clientMemory), 0, 1);
-    if (ret != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("unable to load static memory and create ctx\n");
-    #endif
-        goto exit;
-    }
-
-    /* load in a buffer for IO */
-    ret = wolfSSL_CTX_load_static_memory(
-            &ctx, NULL, clientMemoryIO, sizeof(clientMemoryIO),
-            WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
-    if (ret != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("unable to load static IO memory and create ctx\n");
-    #endif
-        goto exit;
-    }
-#endif
-    if (ctx == NULL) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("wolfSSL_CTX_new error\n");
-    #endif
-        ret = MEMORY_E; goto exit;
-    }
-
-    /* set up pre shared keys */
-    wolfSSL_CTX_set_psk_client_callback(ctx, KeyClient_PskCb);
 
     /* create socket */
     ret = KeySocket_CreateUdpSocket(&sockfd);
@@ -865,34 +775,63 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
         goto exit;
     }
 
-    /* Connect to socket */
-    ret = KeySocket_Connect(sockfd, srvAddr, SERV_PORT);
-    if (ret != 0) {
-        goto exit;
-    }
+    /* enable broadcast */
+    KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
 
-    /* creat wolfssl object after each tcp connct */
-    if ( (ssl = wolfSSL_new(ctx)) == NULL) {
+    /* build request */
+    XMEMSET(&reqPkt, 0, sizeof(reqPkt));
+    reqPkt.header.version = CMD_PKT_VERSION;
+    reqPkt.header.type = reqType;
+
+    /* build broadcast addr */
+    XMEMSET(&clientAddr, 0, sizeof(clientAddr));
+    clientAddr.sin_family = AF_INET;;
+    clientAddr.sin_port = htons(KEY_BCAST_PORT);
+    clientAddr.sin_addr = *srvAddr;
+
+    /* send broadcast */
+    ret = KeySocket_SendTo(sockfd, (char*)req, sizeof(reqPkt), 0,
+        (struct sockaddr*)&clientAddr, clientAddrLen);
+    if (ret != sizeof(reqPkt)) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("wolfSSL_new error\n");
+        printf("KeyClient_GetNetUdp Error: KeySocket_SendTo %d\n", ret);
     #endif
-        ret = MEMORY_E; goto exit;
+        ret = -1;
+        goto exit;
     }
 
-    /* associate the file descriptor with the session */
-#ifdef HAVE_NETX
-    wolfSSL_SetIO_NetX(ssl, sockfd, NX_WAIT_FOREVER);
-#else
-    ret = wolfSSL_set_fd(ssl, sockfd);
-    if (ret != SSL_SUCCESS)
+    /* read response */
+    n = KeySocket_RecvFrom(sockfd, (char*)resp, sizeof(respPkt), 0,
+                             (struct sockaddr*)&clientAddr, &clientAddrLen);
+    if (n <= 0) {
+        ret = n;
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("KeyClient_GetNetUdp: Response error or timeout! %d!\n", ret);
+    #endif
         goto exit;
+    }
 
+    ato16(respPkt.header.size, &size);
+
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+    /* show response from the server */
+    printf("Response: Version %d, Cmd %d, Size %d\n",
+            respPkt.header.version, respPkt.header.type, size);
 #endif
 
-    /* perform request and return response */
-    ret = KeyClient_Perform(ssl, reqType, msg, msgLen);
-    if (ret != 0)
-        goto exit;
+    /* make sure resposne will fit into buffer */
+    n = size;
+    if (msgLen && n > *msgLen) {
+        n = *msgLen;
+    }
+
+    /* return msg */
+    if (msg)
+        XMEMCPY(msg, respPkt.msg.raw, n);
+    if (msgLen)
+        *msgLen = size;
+
+    ret = 0; /* success */
 
 exit:
 
@@ -902,15 +841,7 @@ exit:
     }
 #endif
 
-    wolfSSL_shutdown(ssl);
     KeySocket_Close(&sockfd);
-
-    /* cleanup */
-    wolfSSL_free(ssl);
-
-    /* when completely done using SSL/TLS, free the
-     * wolfssl_ctx object */
-    wolfSSL_CTX_free(ctx);
 
     return ret;
 }

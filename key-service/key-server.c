@@ -1,56 +1,17 @@
 #include "key-services.h"
-#include "key-beacon.h"
 
 #ifndef NETX
-    /* additional *nix headers needed for threading, select and time */
-    #include <sys/select.h>
-    #include <sys/time.h>
     #include <pthread.h>
-#endif
+    static void* KeyServerUdpThread(void* arg)
+    {
+        int ret;
+        void* heap = arg;
 
-#ifndef NETX
-static void* KeyServerUdpThread(void* arg)
-{
-    KeyBeacon_Handle_t *h;
-    KS_SOCKET_T s = KS_SOCKET_T_INIT;
-    int error = 0;
-    struct sockaddr_in groupAddr;
-    struct in_addr myAddr;
-    int enabled = 1;
-    (void)arg;
-printf("KeyServerUdpThread...\n");
-    memset(&groupAddr, 0, sizeof(groupAddr));
-    memset(&myAddr, 0, sizeof(myAddr));
-    
-    groupAddr.sin_family = AF_INET;
-    groupAddr.sin_port = htons(SERV_PORT);
-    groupAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    myAddr.s_addr = inet_addr("192.168.2.1");
+        ret = KeyServer_RunUdp(heap);
 
-    KeySocket_CreateUdpSocket(&s);
-    KeySocket_Bind(s, &groupAddr.sin_addr, SERV_PORT);
-    KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
-    KeySocket_SetNonBlocking(s);
-    h = KeyBeacon_GetGlobalHandle();
-    KeyBeacon_Init(h);
-    KeyBeacon_AllowFloatingMaster(h, 1);
-    KeyBeacon_FloatingMaster(h, 1);
-
-    groupAddr.sin_family = AF_INET;
-    groupAddr.sin_port = htons(SERV_PORT);
-    groupAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
-
-    KeyBeacon_SetSocket(h, s, (struct sockaddr*)&groupAddr, &myAddr);
-printf("about to loop forever\n");
-    while (!error) {
-        error = KeyBeacon_Handler(h);
-        printf("Sleeping\n");
-        sleep(1);
+        return (void*)((size_t)ret);
     }
-
-    return NULL;
-}
-#endif
+#endif /* !NETX */
 
 int main(int argc, char **argv)
 {
@@ -67,24 +28,38 @@ int main(int argc, char **argv)
     wolfSSL_Debugging_ON();
 #endif
 
-    wolfSSL_Init();  /* initialize wolfSSL */
+    ret = wolfSSL_Init();
+    if (ret != SSL_SUCCESS) {
+        printf("Error: wolfSSL_Init\n");
+        goto exit;
+    }
+
+    ret = KeyServer_Init(heap);
+    if (ret != 0) {
+        printf("Error: KeyServer_Init\n");
+        wolfSSL_Cleanup();
+        return ret;
+    }
 
 #ifndef NETX
     /* spin up another server for UDP */
-    ret = pthread_create(&tid, NULL, KeyServerUdpThread, NULL);
+    ret = pthread_create(&tid, NULL, KeyServerUdpThread, heap);
     if (ret < 0) {
         printf("Pthread create failed for UDP\n");
+        goto exit;
     }
 #endif
 
-    if (ret >= 0)
-        ret = KeyServer_Run(heap);
+    ret = KeyServer_Run(heap);
 
 #ifndef NETX
     pthread_join(tid, NULL);
+
+exit:
 #endif
 
     wolfSSL_Cleanup();
+    KeyServer_Free(heap);
 
     return ret;
 }

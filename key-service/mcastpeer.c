@@ -157,17 +157,26 @@ static void* PeerThread(void* arg)
     byte memoryIO[34500];
 #endif
     struct in_addr keySrvAddr;
+    unsigned char* addr;
+    int opt = 1;
+    const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
+    keyResp = (KeyRespPacket_t*)peer->msg; /* use peer msg buffer for key response info */
 
     gettimeofday(&start, NULL);
 
+    /* set the broadcast address */
+    XMEMCPY(&keySrvAddr.s_addr, bcast_addr, sizeof(keySrvAddr.s_addr));
+
+    /* find master using UDP broadcast message */
     ret = KeyClient_FindMaster(&keySrvAddr, heap);
     if (ret != 0) {
         printf("unable to find master %d\n", ret);
         XMEMCPY(&keySrvAddr, &gKeySrvAddr, sizeof(gKeySrvAddr));
     }
+    addr = (unsigned char*)&keySrvAddr.s_addr;
+    printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
 
     /* Get PMS, Server/Client Random from Key Server */
-    keyResp = (KeyRespPacket_t*)peer->msg; /* use peer msg buffer for key response info */
     ret = KeyClient_GetKey(&keySrvAddr, keyResp, heap);
     if (ret != 0) {
         printf("unable to get key from server %d\n", ret);
@@ -190,6 +199,11 @@ static void* PeerThread(void* arg)
         perror("create tx socket failed");
         goto exit;
     }
+
+#ifdef SO_REUSEPORT
+    KeySocket_SetSockOpt(peer->rxfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+    KeySocket_SetSockOpt(peer->txfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
 
     ret = KeySocket_Bind(peer->rxfd, &gAnyAddr, GROUP_PORT);
     if (ret < 0) {
@@ -434,6 +448,7 @@ int main(int argc, char** argv)
     int ret = 0;
     pthread_t keySrvTid, keySrvUdpTid;
     int peerThreads;
+    void* heap = NULL;
 
     if (argc < 2) {
         printf("Usage: mcastpeer [threads]\n");
@@ -449,11 +464,22 @@ int main(int argc, char** argv)
     }
 #endif
 
-#if defined(DEBUG_WOLFSSL) && !defined(STACK_TRAP)
-    wolfSSL_Debugging_ON();
+#if defined(DEBUG_WOLFSSL)
+    //wolfSSL_Debugging_ON();
 #endif
 
-    wolfSSL_Init();
+    ret = wolfSSL_Init();
+    if (ret != SSL_SUCCESS) {
+        printf("Error: wolfSSL_Init\n");
+        goto exit;
+    }
+
+    ret = KeyServer_Init(heap);
+    if (ret != 0) {
+        printf("Error: KeyServer_Init\n");
+        wolfSSL_Cleanup();
+        return ret;
+    }
 
     /* start key server */
     ret = KeyServerStart(&keySrvTid, &keySrvUdpTid);
@@ -465,6 +491,7 @@ int main(int argc, char** argv)
     StartPeers(peerThreads);
 
     pthread_join(keySrvTid, NULL);
+    pthread_join(keySrvUdpTid, NULL);
 
 exit:
 
@@ -473,6 +500,7 @@ exit:
     free(gPeers);
 
     wolfSSL_Cleanup();
+    KeyServer_Free(heap);
 
     return 0;
 }

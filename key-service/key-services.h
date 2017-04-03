@@ -8,7 +8,6 @@
 #define PMS_SIZE       64 /* SHA256 Block size */
 #define RAND_SIZE      32
 #define MAX_PACKET_MSG (sizeof(CmdRespMsg_t))
-#define SERV_PORT      11111  /* default port*/
 #define LISTENQ        100*100   /* maximum backlog queue items */
 #define EPOCH_SIZE     2
 #define SUITE_SIZE     2
@@ -16,7 +15,23 @@
 #define CIPHER_SUITE_0 0
 #define CIPHER_SUITE_1 0xFE
 #define MAX_ID_LEN     32 /* wolf supports up to 128 bytes */
-#define KEY_SERVER_BCAST_ADDR "192.168.0.255"
+
+/* Subnet to broadcast key discovery message */
+#ifndef KEY_BCAST_ADDR
+    #define KEY_BCAST_ADDR      192,168,0,255
+#endif
+#ifndef KEY_BCAST_PORT
+    #define KEY_BCAST_PORT      22222
+#endif
+
+/* IP address to return for key server discovery */
+#ifndef KEY_SERV_LOCAL_ADDR
+    #define KEY_SERV_LOCAL_ADDR 192,168,0,111
+#endif
+#ifndef KEY_SERV_PORT
+    #define KEY_SERV_PORT       11111
+#endif
+
 
 #ifndef WOLFSSL_PACK
 #if defined(__GNUC__)
