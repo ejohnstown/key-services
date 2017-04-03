@@ -24,7 +24,6 @@
 #include <wolfssl/wolfcrypt/memory.h>
 #include "wolfcast.h"
 #include "key-services.h"
-#include "key-beacon.h"
 
 
 #ifndef NETX
@@ -969,102 +968,6 @@ WolfcastServer(WOLFSSL *ssl)
 #ifndef NO_MAIN_DRIVER
 
 
-static void *
-KeyBeaconThreadEntry(void *ignore)
-{
-    KeyBeacon_Handle_t *h;
-    KS_SOCKET_T s = KS_SOCKET_T_INIT;
-    int error = 0;
-    unsigned short port = SERV_PORT;
-
-    (void)ignore;
-
-    h = KeyBeacon_GetGlobalHandle();
-    if (h == NULL) {
-        error = 1;
-        WCERR("KeyBeacon thread couldn't get global handle.");
-    }
-
-    if (!error) {
-        struct sockaddr_in bcAddr;
-        struct in_addr myAddr;
-        int ret;
-
-        memset(&bcAddr, 0, sizeof(bcAddr));
-        memset(&myAddr, 0, sizeof(myAddr));
-        bcAddr.sin_family = AF_INET;
-        bcAddr.sin_port = htons(SERV_PORT);
-        bcAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        myAddr.s_addr = inet_addr(LOCAL_ADDR);
-
-        ret = KeySocket_CreateUdpSocket(&s);
-        if (ret != 0) {
-            error = 1;
-        }
-
-        if (!error) {
-            ret = KeySocket_Bind(s, &myAddr, ntohs(bcAddr.sin_port));
-            if (ret != 0) {
-                error = 1;
-                WCERR("Cannot bind the key beacon socket.");
-            }
-        }
-
-        if (!error) {
-            int enabled = 1;
-
-    /* enable broadcast */
-    KeySocket_SetSockOpt(s, SOL_SOCKET, SO_BROADCAST,
-        &enabled, sizeof(enabled));
-
-            ret = KeySocket_SetNonBlocking(s);
-            if (ret != 0) {
-                error = 1;
-                WCERR("Cannot set beacon socket to non-blocking.");
-            }
-        }
-
-        if (!error) {
-            bcAddr.sin_family = AF_INET;
-            bcAddr.sin_port = htons(SERV_PORT);
-            bcAddr.sin_addr.s_addr = inet_addr("192.168.2.255");
-            error = KeyBeacon_SetSocket(h, s,
-                                        (struct sockaddr *)&bcAddr,
-                                        &myAddr);
-            if (error) {
-                WCERR("KeyBeacon thread couldn't set the socket.");
-            }
-        }
-
-        if (!error) {
-            error = KeyBeacon_FloatingMaster(h, 0);
-            if (error) {
-                printf("Couldn't disable floating master\n");
-            }
-        }
-
-        if (!error) {
-            error = KeyBeacon_FindMaster(h);
-            if (error) {
-                WCERR("KeyBeacon thread can't find the master.");
-            }
-        }
-    }
-
-    while (!error) {
-        error = KeyBeacon_Handler(h);
-        printf("Key Beacon handler sleeping\n");
-        sleep(1);
-    }
-
-    if (error) {
-        WCERR("KeyBeacon handler cannot run.");
-    }
-
-    return NULL;
-}
-
-
 #define PEER_ID_LIST_SZ 99
 
 int
@@ -1084,8 +987,6 @@ main(
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
     struct in_addr keySrvAddr;
-    pthread_t beaconThread;
-    KeyBeacon_Handle_t *beacon;
 
     memset(&keySrvAddr, 0, sizeof(keySrvAddr));
 
@@ -1152,52 +1053,6 @@ main(
     }
 
     if (!error) {
-        beacon = KeyBeacon_GetGlobalHandle();
-        if (beacon == NULL) {
-            error = 1;
-            WCERR("Couldn't get the key beacon handle.");
-        }
-    }
-
-    if (!error) {
-        error = KeyBeacon_Init(beacon);
-        if (error) {
-            WCERR("Couldn't initialize key beacon.");
-        }
-    }
-
-    if (!error) {
-        if (pthread_create(&beaconThread, NULL,
-                           KeyBeaconThreadEntry, NULL) != 0) {
-            error = 1;
-            WCERR("Couldn't spin up the key beacon thread.");
-        }
-    }
-
-    if (!error) {
-        ret = KeyBeacon_FindMaster(beacon);
-        if (ret != 0) {
-            error = 1;
-            WCERR("Couldn't try to find the master.\n");
-        }
-    }
-
-    if (!error) {
-        do {
-            ret = KeyBeacon_GetMaster(beacon, &keySrvAddr);
-            if (ret == KB_FM_WAITING) {
-                printf("Get Master address sleeping.\n");
-                sleep(1);
-            }
-        } while (ret == KB_FM_WAITING);
-
-        if (ret != 0) {
-            error = 1;
-            WCERR("Couldn't get the master address.");
-        }
-    }
-
-    if (!error) {
         error = WolfcastInit(isClient, myId, &ctx, &si);
         if (error) {
             WCERR("Couldn't initialize wolfCast.");
@@ -1216,31 +1071,24 @@ main(
             fd_set readfds;
             struct timeval timeout = {0, 500000};
 
-            ret = KeyClient_FindMaster(&keySrvAddr, NULL);
-            if (ret != 0) {
-                error = 1;
-                WCERR("unable to find master");
-            }
-
-            if (!error) {
-                do {
-                    ret = KeyBeacon_GetMaster(beacon, &keySrvAddr);
-                    if (ret ==  KB_FM_WAITING)
-                        sleep(1);
-                } while (ret == KB_FM_WAITING);
-
-                if (ret == KB_FM_FAILED) {
-                    error = 1;
-                    WCERR("unable to get master address");
-                }
-            }
-
             if (iteration == 0) {
                 WOLFSSL *newSsl;
                 KeyRespPacket_t keyResp;
                 unsigned short newEpoch;
 
                 iteration = 20;
+
+                if (!error) {
+                    unsigned char* addr;
+
+                    ret = KeyClient_FindMaster(&keySrvAddr, NULL);
+                    if (ret != 0) {
+                        error = 1;
+                        WCERR("unable to find master");
+                    }
+                    addr = (unsigned char*)&keySrvAddr.s_addr;
+                    printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+                }
 
                 if (!error) {
                     ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
@@ -1313,6 +1161,17 @@ main(
             WOLFSSL *newSsl;
             KeyRespPacket_t keyResp;
             unsigned short newEpoch;
+            unsigned char* addr;
+
+            if (!error) {
+                ret = KeyClient_FindMaster(&keySrvAddr, NULL);
+                if (ret != 0) {
+                    error = 1;
+                    WCERR("unable to find master");
+                }
+                addr = (unsigned char*)&keySrvAddr.s_addr;
+                printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+            }
 
             if (!error) {
                 ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);

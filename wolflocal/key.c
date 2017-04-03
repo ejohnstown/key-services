@@ -1,7 +1,6 @@
 #include "benchmark.h"
 #include "wolftest.h"
 #include "key-services.h"
-#include "key-beacon.h"
 #include "wolfcast.h"
 #include "key.h"
 
