@@ -37,13 +37,27 @@ static int gKeyServerStop = 0;
 static unsigned short gKeyServerEpoch;
 
 #ifdef WOLFSSL_STATIC_MEMORY
-    #ifdef HAVE_NETX
-        static byte clientMemory[80000];
-        static byte clientMemoryIO[34500];
+    #if defined(NETX) && defined(PGB002)
+        #define MEMORY_SECTION LINK_SECTION(data_sdram)
+    #else
+        #define MEMORY_SECTION
     #endif
-    static byte serverMemory[80000];
-    static byte serverMemoryIO[34500];
+
+    static MEMORY_SECTION byte clientMemory[80000];
+    static MEMORY_SECTION byte clientMemoryIO[34500];
+    static MEMORY_SECTION byte serverMemory[80000];
+    static MEMORY_SECTION byte serverMemoryIO[34500];
 #endif
+
+enum {
+    CMD_PKT_PUBLIC,
+    CMD_PKT_PRIVATE,
+};
+
+static const int gRespPrivacy[CMD_PKT_TYPE_COUNT] = {
+    CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_DISCOVER */
+    CMD_PKT_PRIVATE /* CMD_PKT_TYPE_KEY_REQ */
+};
 
 /*
  * Identify which psk key to use.
@@ -83,7 +97,7 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
     int ret = 0;
     WC_RNG rng;
     const int type = CMD_PKT_TYPE_KEY_REQ;
-    CmdRespPacket_t* resp = &gRespPkt[type-1];
+    CmdRespPacket_t* resp = &gRespPkt[type];
 
     /* get random data for message bytes */
     ret = wc_InitRng_ex(&rng, heap);
@@ -129,7 +143,7 @@ static int KeyReq_BuildDiscover(void)
 {
     int ret = 0;
     const int type = CMD_PKT_TYPE_DISCOVER;
-    CmdRespPacket_t* resp = &gRespPkt[type-1];
+    CmdRespPacket_t* resp = &gRespPkt[type];
     const unsigned char ipaddr[4] = {KEY_SERV_LOCAL_ADDR};
     int ipaddrSz = sizeof(ipaddr);
 
@@ -149,6 +163,7 @@ static int KeyReq_BuildKeyReq(void* heap)
 
 static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
 {
+    /* set defaults */
     if (resp)
         *resp = NULL;
     if (respLen)
@@ -161,16 +176,16 @@ static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
     /* calculate and return packet size */
     if (respLen) {
         unsigned short size;
-        ato16(gRespPkt[type-1].header.size, &size);
+        ato16(gRespPkt[type].header.size, &size);
         *respLen = size + sizeof(CmdPacketHeader_t);
     }
 
     /* return buffer to response */
     if (resp)
-        *resp = (unsigned char*)&gRespPkt[type-1];
+        *resp = (unsigned char*)&gRespPkt[type];
 }
 
-static int KeyReq_Check(CmdReqPacket_t* reqPkt)
+static int KeyReq_Check(CmdReqPacket_t* reqPkt, int privacy)
 {
     int ret = 0;
 
@@ -203,6 +218,16 @@ static int KeyReq_Check(CmdReqPacket_t* reqPkt)
         return -1;
     }
 
+    /* check privacy - if type is private and privacy is public, reject */
+    if (gRespPrivacy[reqPkt->header.type] == CMD_PKT_PRIVATE &&
+                                  privacy == CMD_PKT_PUBLIC) {
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("KeyReq_Check: Invalid privacy for request\n");
+    #endif
+        return -1;
+    }
+
+
     return ret;
 }
 
@@ -212,7 +237,7 @@ int KeyServer_Init(void* heap)
 
     if (++gKeyServerInitDone == 1) {
         gRespPkt = (CmdRespPacket_t*)XMALLOC(
-                        sizeof(CmdRespPacket_t) * (CMD_PKT_TYPE_COUNT-1),
+                        sizeof(CmdRespPacket_t) * CMD_PKT_TYPE_COUNT,
                         heap, DYNAMIC_TYPE_TMP_BUFFER);
         if (gRespPkt == NULL) {
             return MEMORY_E;
@@ -344,7 +369,7 @@ int KeyServer_RunUdp(void* heap)
             printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
         #endif
             /* check request */
-            ret = KeyReq_Check(&reqPkt);
+            ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
             if (ret != 0) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
                 printf("KeyServer_RunUdp Error: KeyReq_Check failed %d\n", ret);
@@ -475,7 +500,7 @@ int KeyServer_Run(void* heap)
             n = wolfSSL_read(ssl, req, sizeof(CmdReqPacket_t));
             if (n > 0) {
                 /* check request */
-                ret = KeyReq_Check(&reqPkt);
+                ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
                 if (ret != 0) {
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
                     printf("KeyServer_Run: KeyReq_Check error %d\n", ret);
@@ -664,10 +689,6 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     KS_SOCKET_T sockfd = &realSock;
 #else
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
-#ifdef WOLFSSL_STATIC_MEMORY
-    byte clientMemory[80000];
-    byte clientMemoryIO[34500];
-#endif
 #endif
     WOLFSSL* ssl = NULL;
     WOLFSSL_CTX* ctx = NULL;

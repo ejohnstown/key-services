@@ -45,9 +45,9 @@
 
 /* Command Packet Types */
 enum CmdPacketCommandType {
-    CMD_PKT_TYPE_INVALID = 0,
-    CMD_PKT_TYPE_DISCOVER =  1,
-    CMD_PKT_TYPE_KEY_REQ = 2,
+    CMD_PKT_TYPE_INVALID = -1,
+    CMD_PKT_TYPE_DISCOVER =  0,
+    CMD_PKT_TYPE_KEY_REQ = 1,
 
     CMD_PKT_TYPE_COUNT,
 };
@@ -70,7 +70,7 @@ typedef struct DiscRespPacket {
 /* Command Header */
 typedef struct CmdPacketHeader {
     unsigned char version; /* Version = 1 - Allows future protocol changes */
-    unsigned char type;    /* Type: 1=KeyReq, 2=Future Commands */
+    unsigned char type;    /* Type: 1=Discovery, 2=KeyReq, ...Future Commands */
     unsigned char size[SIZE_SIZE];    /* Message Size (remaining packet bytes to follow) */
 } WOLFSSL_PACK CmdPacketHeader_t;
 
