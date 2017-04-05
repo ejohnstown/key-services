@@ -34,6 +34,8 @@
 #endif
 
 int WolfcastInit(int, unsigned short, WOLFSSL_CTX **, SocketInfo_t *);
+int WolfcastSessionNew(WOLFSSL **, WOLFSSL_CTX *, SocketInfo_t *, int,
+                   const unsigned short *, unsigned int);
 int WolfcastClientInit(unsigned int *, unsigned int *);
 int WolfcastClient(SocketInfo_t *, WOLFSSL *, WOLFSSL *,
                    unsigned short, unsigned short,

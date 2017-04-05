@@ -260,9 +260,6 @@ CreateSockets(SocketInfo_t* si, int isClient)
     #define GROUP_ADDR 0xE2000003
     #define GROUP_PORT 12345
 
-    static struct in_addr keySrvAddr = { IP_ADDRESS(192,168,2,1) };
-    static int hasKey = 0;
-
 
 static int
 NetxDtlsTxCallback(
@@ -775,7 +772,7 @@ static unsigned short GetEpoch(NX_PACKET *packet)
     UINT status;
     unsigned short epoch = 0;
 
-    status = nx_packet_data_extract_offset(pkt, 0,
+    status = nx_packet_data_extract_offset(packet, 0,
                                            buf, sizeof(buf),
                                            &bytesCopied);
 
@@ -827,10 +824,11 @@ WolfcastClient(SocketInfo_t *si,
 
     if (!error) {
 #ifdef NETX
-        UINT n;
+        UINT status;
+        NX_PACKET *nxPacket = NULL;
 
-        n = nx_udp_socket_receive(si->rxSocket, &nxPacket, NX_NO_WAIT);
-        if (n == NX_SUCCESS) {
+        status  = nx_udp_socket_receive(&si->rxSocket, &nxPacket, NX_NO_WAIT);
+        if (status == NX_SUCCESS) {
             WOLFSSL *ssl;
             unsigned short peerId;
             unsigned short epoch;
@@ -840,7 +838,7 @@ WolfcastClient(SocketInfo_t *si,
             ssl = (epoch == curEpoch) ? curSsl : prevSsl;
 
             if (ssl != NULL) {
-                n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
+                int n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
                 if (n < 0) {
                     n = wolfSSL_get_error(ssl, n);
                     if (n != SSL_ERROR_WANT_READ) {
@@ -856,8 +854,8 @@ WolfcastClient(SocketInfo_t *si,
             }
 
             if (si->rxPacket != NULL) {
-                ret = nx_packet_release(si->rxPacket);
-                if (ret != NX_SUCCESS) {
+                status = nx_packet_release(si->rxPacket);
+                if (status != NX_SUCCESS) {
                     error = 1;
                     WCERR("couldn't release packet");
                 }
