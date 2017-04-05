@@ -160,10 +160,16 @@ KeyServerEntry(ULONG ignore)
 static void
 KeyServerUdpEntry(ULONG ignore)
 {
-    int ret;
+    int result;
 
-    ret = KeyServer_RunUdp(NULL);
-    if (ret != 0) {
+    (void)ignore;
+
+    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+        KS_PRINTF("Key Service udp server waiting for network.\n");
+    }
+
+    result = KeyServer_RunUdp(NULL);
+    if (result != 0) {
         KS_PRINTF("KeyServerUdp terminated. (%d)\n", result);
     }
 }
@@ -376,7 +382,7 @@ WolfLocalInit(void)
         return;
     }
 
-    statis = tx_thread_create(&gKeyServerUdpThread, "key service udp server",
+    status = tx_thread_create(&gKeyServerUdpThread, "key service udp server",
                               KeyServerUdpEntry, 0,
                               gKeyServerUdpStack, sizeof(gKeyServerUdpStack),
                               KS_PRIORITY, KS_THRESHOLD,
