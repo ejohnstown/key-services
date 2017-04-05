@@ -30,6 +30,8 @@ unsigned int LowResTimer(void)
     return(tx_time_get() / 100);
 }
 
+/* The rest of this file is the start up code and entry points for the
+ * threads used to demonstrate the DTLS Multicast. */
 
 #define KS_PRINTF bsp_debug_printf
 #define KS_STACK_SZ (6 * 1024)
@@ -62,10 +64,12 @@ unsigned int LowResTimer(void)
  * and typically named "status". */
 
 static TX_THREAD gKeyServerThread;
+static TX_THREAD gKeyServerUdpThread;
 static TX_THREAD gKeyClientThread;
 static TX_THREAD gWolfCastClientThread;
 
 static char gKeyServerStack[KS_STACK_SZ];
+static char gKeyServerUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[KS_STACK_SZ];
 static unsigned char gKeyServerMemory[KS_MEMORY_POOL_SZ];
@@ -118,23 +122,50 @@ KeyServerEntry(ULONG ignore)
     result = wolfSSL_Init();
     if (result != SSL_SUCCESS) {
         KS_PRINTF("KeyServer couldn't initialize wolfSSL. (%d)\n", result);
-        return;
     }
 
-    result = wc_LoadStaticMemory(&heap,
-                                 gKeyServerMemory, sizeof(gKeyServerMemory),
-                                 WOLFMEM_GENERAL, 1);
-    if (result != 0) {
-        KS_PRINTF("KeyServer couldn't get memory pool. (%d)\n", result);
-        return;
+    if (result == SSL_SUCCESS) {
+        result = wc_LoadStaticMemory(&heap,
+                                     gKeyServerMemory, sizeof(gKeyServerMemory),
+                                     WOLFMEM_GENERAL, 1);
+        if (result != 0) {
+            KS_PRINTF("KeyServer couldn't get memory pool. (%d)\n", result);
+        }
     }
 
-    result = KeyServer_Run(heap);
-    if (result != 0) {
-        KS_PRINTF("KeyServer terminated. (%d)\n", result);
+    if (result == 0) {
+        result = KeyServer_Init(heap);
+        if (result != 0) {
+            KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
+        }
     }
+
+    if (result == 0) {
+        result = KeyServer_Run(heap);
+        if (result != 0) {
+            KS_PRINTF("KeyServer terminated. (%d)\n", result);
+        }
+    }
+
+    KeyServer_Free(heap);
 
     wolfSSL_Cleanup();
+}
+
+
+/* KeyServerUdpEntry
+ * Thread entry point to drive the key server's UDP beacon. Key server
+ * really shouldn't ever return, but the return code is checked and
+ * reported, just in case. */
+static void
+KeyServerUdpEntry(ULONG ignore)
+{
+    int ret;
+
+    ret = KeyServer_RunUdp(NULL);
+    if (ret != 0) {
+        KS_PRINTF("KeyServerUdp terminated. (%d)\n", result);
+    }
 }
 
 
@@ -227,7 +258,9 @@ WolfCastClientEntry(ULONG ignore)
 {
     SocketInfo_t socketInfo; /* Used in the WOLFSSL object. */
     WOLFSSL_CTX *ctx; /* Used in the WOLFSSL object. */
-    WOLFSSL *ssl;
+    WOLFSSL *curSsl = NULL;
+    WOLFSSL *prevSsl = NULL;
+    unsigned short epoch = 0;
     unsigned int txTime;
     unsigned int txCount;
     int error;
@@ -244,9 +277,7 @@ WolfCastClientEntry(ULONG ignore)
         KS_PRINTF("wolfCast thread waiting for network.\n");
     }
 
-    error = WolfcastInit(1, CLIENT_ID,
-                         peerIdList, sizeof(peerIdList)/sizeof(peerIdList[0]),
-                         &ctx, &ssl, &socketInfo);
+    error = WolfcastInit(1, CLIENT_ID, &ctx, &socketInfo);
     if (!error) {
         error = WolfcastClientInit(&txTime, &txCount);
     }
@@ -277,6 +308,9 @@ WolfCastClientEntry(ULONG ignore)
 
     while (1) {
         if (!error) {
+            WOLFSSL *newSsl = NULL;
+            unsigned short newEpoch;
+
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
                 if (gKeySet) {
@@ -287,10 +321,15 @@ WolfCastClientEntry(ULONG ignore)
                 status = tx_mutex_put(&gKeyStateMutex);
             }
 
-            if (status == TX_SUCCESS && keySet) {
+            if (status == TX_SUCCESS) {
+                error = WolfcastSessionNew(&newSsl, ctx, &socketInfo, 1,
+                        peerIdList, sizeof(peerIdList) / sizeof(peerIdList[0]));
+            }
+
+            if (!error && newSsl != NULL && keySet) {
                 keySet = 0;
-                result = wolfSSL_set_secret(ssl,
-                                ((keyState.epoch[0] << 8) | keyState.epoch[1]),
+                newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
+                result = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyState.pms, sizeof(keyState.pms),
                                 keyState.clientRandom, keyState.serverRandom,
                                 keyState.suite);
@@ -300,11 +339,20 @@ WolfCastClientEntry(ULONG ignore)
                 }
 
                 memset(&keyState, 0, sizeof(keyState));
+
+                if (!error) {
+                    if (prevSsl != NULL)
+                        wolfSSL_free(prevSsl);
+                    prevSsl = curSsl;
+                    curSsl = newSsl;
+                    epoch = newEpoch;
+                }
             }
         }
 
         if (!error)
-            error = WolfcastClient(ssl, CLIENT_ID, &txTime, &txCount);
+            error = WolfcastClient(&socketInfo, curSsl, prevSsl, epoch,
+                                   CLIENT_ID, &txTime, &txCount);
 
         tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
@@ -325,6 +373,17 @@ WolfLocalInit(void)
 
     if (KeySocket_Init() != 0) {
         KS_PRINTF("couldn't initialize the KeySocket\n");
+        return;
+    }
+
+    statis = tx_thread_create(&gKeyServerUdpThread, "key service udp server",
+                              KeyServerUdpEntry, 0,
+                              gKeyServerUdpStack, sizeof(gKeyServerUdpStack),
+                              KS_PRIORITY, KS_THRESHOLD,
+                              TX_NO_TIME_SLICE, TX_AUTO_START);
+    if (status != TX_SUCCESS) {
+        KS_PRINTF("key %s thread create failed = 0x%02X\n",
+                  "server udp", status);
         return;
     }
 
