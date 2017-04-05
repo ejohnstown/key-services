@@ -13,8 +13,17 @@
 
 #ifdef HAVE_NETX
     #define printf bsp_debug_printf
+    #define htons(x) (x)
     extern NX_IP *nxIp;
+
+    #define KEY_SERVICE_SLEEP(x) tx_thread_sleep(x)
+    #define KEY_SERVICE_TICKS_PER_SECOND 100
+#else
+    #define KEY_SERVICE_SLEEP(x) usleep(x)
+    #define KEY_SERVICE_TICKS_PER_SECOND 1000000
 #endif
+
+#define KEY_SERVICE_RECV_TIMEOUT (1 * KEY_SERVICE_TICKS_PER_SECOND)
 
 /*----------------------------------------------------------------------------*/
 /* Server */
@@ -289,7 +298,7 @@ int KeyServer_RunUdp(void* heap)
     int                 ret = 0;
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
     const unsigned long inAddrAny = INADDR_ANY;
-    int opt = 1, n;
+    int n;
     CmdReqPacket_t reqPkt;
     unsigned char* req = (unsigned char*)&reqPkt;
     unsigned char* resp;
@@ -306,7 +315,12 @@ int KeyServer_RunUdp(void* heap)
     KeySocket_SetNonBlocking(listenfd);
 
     /* enable broadcast */
-    KeySocket_SetSockOpt(listenfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+#ifndef NETX
+    {
+        int opt = 1;
+        KeySocket_SetSockOpt(listenfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+    }
+#endif
 
     /* setup socket listener */
     ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_BCAST_PORT);
@@ -350,7 +364,7 @@ int KeyServer_RunUdp(void* heap)
         }
         else if (ret == WOLFSSL_CBIO_ERR_WANT_READ) {
             /* no data (EAGAIN) */
-            sleep(1);
+            KEY_SERVICE_SLEEP(KEY_SERVICE_RECV_TIMEOUT);
             ret = 0;
         }
         else if (ret < 0) {
@@ -765,7 +779,7 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     unsigned short size;
     struct sockaddr_in clientAddr;
     socklen_t clientAddrLen = sizeof(clientAddr);
-    int opt = 1, n;
+    int n;
 
     (void)heap;
 
@@ -776,7 +790,12 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     }
 
     /* enable broadcast */
-    KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+#ifndef NETX
+    {
+        int opt = 1;
+        KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+    }
+#endif
 
     /* build request */
     XMEMSET(&reqPkt, 0, sizeof(reqPkt));
@@ -785,7 +804,7 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
 
     /* build broadcast addr */
     XMEMSET(&clientAddr, 0, sizeof(clientAddr));
-    clientAddr.sin_family = AF_INET;;
+    clientAddr.sin_family = AF_INET;
     clientAddr.sin_port = htons(KEY_BCAST_PORT);
     clientAddr.sin_addr = *srvAddr;
 

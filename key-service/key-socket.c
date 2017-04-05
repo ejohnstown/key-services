@@ -30,12 +30,21 @@ int KeySocket_Init(void)
 int KeySocket_SetSockOpt(KS_SOCKET_T sockFd, int type, int so,
     const void* opt, size_t opt_sz)
 {
-    int ret = setsockopt(sockFd, type, so, opt, opt_sz);
+    int ret = 0;
+#ifndef HAVE_NETX
+    ret = setsockopt(sockFd, type, so, opt, opt_sz);
     if (ret < 0) {
     #if KEY_SOCKET_LOGGING_LEVEL >= 1
         printf("setsockopt %d %d failed\n", type, so);
     #endif
     }
+#else
+    (void)sockFd;
+    (void)type;
+    (void)so;
+    (void)opt;
+    (void)opt_sz;
+#endif
     return ret;
 }
 
@@ -241,7 +250,7 @@ int KeySocket_Relisten(KS_SOCKET_T sockFd, KS_SOCKET_T listenFd,
 #ifdef HAVE_NETX
     ret = nx_tcp_server_socket_unaccept(sockFd);
     if (ret == NX_SUCCESS) {
-        ret = nx_tcp_server_socket_relisten(nxIp, srvPort, listenfd);
+        ret = nx_tcp_server_socket_relisten(nxIp, srvPort, listenFd);
         if (ret != NX_SUCCESS) {
             ret = -1;
         }
@@ -443,17 +452,19 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
 {
     int recvd = 0;
 #ifdef HAVE_NETX
+    /* NetX uses two different types for UDP and TCP sockets. We wrap the NetX
+     * sockets as NX_TCP_SOCKET pointers, but need to typecast it back to
+     * NX_UDP_SOCKET here. */
+    NX_UDP_SOCKET *nxSock = (NX_UDP_SOCKET*)sockFd;
     NX_PACKET *nxPacket = NULL;
     unsigned long rxSz = 0;
     unsigned int ret;
     int error = 0;
 
-    /* NetX uses two different types for UDP and TCP sockets. We wrap the NetX
-     * sockets as NX_TCP_SOCKET pointers, but need to typecast it back to
-     * NX_UDP_SOCKET here. */
-    ret = nx_udp_socket_receive((NX_UDP_SOCKET*)sockFd, &nxPacket, NX_NO_WAIT);
-    if (ret != NX_SUCCESS)
+    ret = nx_udp_socket_receive(nxSock, &nxPacket, NX_NO_WAIT);
+    if (ret != NX_SUCCESS) {
         error = 1;
+        /* This may be due to a non-block. Report the error later. */
     }
 
     if (!error) {
@@ -641,12 +652,16 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     int sent = 0;
 
 #ifdef HAVE_NETX
+    /* NetX uses two different types for UDP and TCP sockets. We wrap the NetX
+     * sockets as NX_TCP_SOCKET pointers, but need to typecast it back to
+     * NX_UDP_SOCKET here. */
+    NX_UDP_SOCKET *nxSock = (NX_UDP_SOCKET*)sockFd;
     NX_PACKET *nxPacket = NULL;
+    struct sockaddr_in *addrIn = (struct sockaddr_in*)addr;
     unsigned int ret;
     int error = 0;
 
-
-    ret = nx_packet_allocate(sockFd, &nxPacket, NX_UDP_PACKET, NX_WAIT_FOREVER);
+    ret = nx_packet_allocate(nxSock, &nxPacket, NX_UDP_PACKET, NX_WAIT_FOREVER);
     if (ret != NX_SUCCESS) {
         error = 1;
     #if KEY_SOCKET_LOGGING_LEVEL >= 1
@@ -655,7 +670,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     }
 
     if (!error) {
-        ret = nx_packet_data_append(nxPacket, buf, sz, sockFd, NX_WAIT_FOREVER);
+        ret = nx_packet_data_append(nxPacket, (void*)buf, sz, nxSock, NX_WAIT_FOREVER);
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
@@ -665,8 +680,8 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     }
 
     if (!error) {
-        sent = (int)nx_udp_socket_send(&sockFd, nxPacket,
-            addr->sin_addr.s_addr, addr->sin_port);
+        sent = (int)nx_udp_socket_send(nxSock, nxPacket,
+            addrIn->sin_addr.s_addr, addrIn->sin_port);
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
@@ -687,7 +702,6 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
         }
     }
 
-    (void)addr;
     (void)addrSz;
     (void)flags;
 
