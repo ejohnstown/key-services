@@ -498,7 +498,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
 
     if (!error) {
         if (addr != NULL && addrSz != NULL &&
-            *addrSz >= sizeof(struct sockaddr_in)) {
+            *addrSz >= (socklen_t)sizeof(struct sockaddr_in)) {
 
             ULONG a;
             UINT p;
@@ -661,7 +661,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     unsigned int ret;
     int error = 0;
 
-    ret = nx_packet_allocate(nxSock, &nxPacket, NX_UDP_PACKET, NX_WAIT_FOREVER);
+    ret = nx_packet_allocate(nxPool, &nxPacket, NX_UDP_PACKET, NX_WAIT_FOREVER);
     if (ret != NX_SUCCESS) {
         error = 1;
     #if KEY_SOCKET_LOGGING_LEVEL >= 1
@@ -670,7 +670,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     }
 
     if (!error) {
-        ret = nx_packet_data_append(nxPacket, (void*)buf, sz, nxSock, NX_WAIT_FOREVER);
+        ret = nx_packet_data_append(nxPacket, (void*)buf, sz, nxPool, NX_WAIT_FOREVER);
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1

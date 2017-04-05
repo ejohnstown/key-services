@@ -248,6 +248,7 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
     WOLFSSL_METHOD* method = method_func(heap);
     ctx = wolfSSL_CTX_new(method);
 #else
+    (void)heap;
     ret = wolfSSL_CTX_load_static_memory(
             &ctx, method_func,
             serverMemory, sizeof(serverMemory), 0, 1);
@@ -304,6 +305,8 @@ int KeyServer_RunUdp(void* heap)
     unsigned char* resp;
     struct sockaddr_in clientAddr;
     socklen_t clientAddrLen;
+
+    (void)heap;
 
     /* create socket */
     ret = KeySocket_CreateUdpSocket(&listenfd);
