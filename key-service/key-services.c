@@ -43,8 +43,13 @@ static unsigned short gKeyServerEpoch;
         #define MEMORY_SECTION
     #endif
 
-    static MEMORY_SECTION byte clientMemory[80000];
-    static MEMORY_SECTION byte clientMemoryIO[34500];
+    #if defined(NETX)
+        /* Under NetX we'll have only one client thread. Non-NetX
+         * will use a local buffer in the function since there can
+         * be multiple clients. */
+        static MEMORY_SECTION byte clientMemory[80000];
+        static MEMORY_SECTION byte clientMemoryIO[34500];
+    #endif
     static MEMORY_SECTION byte serverMemory[80000];
     static MEMORY_SECTION byte serverMemoryIO[34500];
 #endif
@@ -679,7 +684,6 @@ static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* ms
     return ret;
 }
 
-
 static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     unsigned char* msg, int* msgLen, void* heap)
 {
@@ -688,6 +692,10 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     NX_TCP_SOCKET realSock;
     KS_SOCKET_T sockfd = &realSock;
 #else
+    #ifdef WOLFSSL_STATIC_MEMORY
+        byte clientMemory[80000];
+        byte clientMemoryIO[34500];
+    #endif
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
 #endif
     WOLFSSL* ssl = NULL;
