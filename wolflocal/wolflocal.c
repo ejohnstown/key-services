@@ -382,6 +382,13 @@ WolfLocalInit(void)
         return;
     }
 
+    status = tx_mutex_create(&gKeyStateMutex, "key state mutex",
+                             TX_NO_INHERIT);
+    if (status != TX_SUCCESS) {
+        KS_PRINTF("key state mutex create failed = 0x%02X\n", status);
+        return;
+    }
+
     status = tx_thread_create(&gKeyServerUdpThread, "key service udp server",
                               KeyServerUdpEntry, 0,
                               gKeyServerUdpStack, sizeof(gKeyServerUdpStack),
@@ -400,13 +407,6 @@ WolfLocalInit(void)
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
         KS_PRINTF("key %s thread create failed = 0x%02X\n", "server", status);
-        return;
-    }
-
-    status = tx_mutex_create(&gKeyStateMutex, "key state mutex",
-                             TX_NO_INHERIT);
-    if (status != TX_SUCCESS) {
-        KS_PRINTF("key state mutex create failed = 0x%02X\n", status);
         return;
     }
 

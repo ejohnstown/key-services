@@ -270,7 +270,7 @@ void KeyServer_Free(void* heap)
 static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func, void* heap)
 {
     int ret = 0;
-    WOLFSSL_CTX* ctx;
+    WOLFSSL_CTX* ctx = NULL;
 
     /* init the WOLFSSL_CTX */
     /* create and initialize WOLFSSL_CTX structure for TLS 1.2 only */
