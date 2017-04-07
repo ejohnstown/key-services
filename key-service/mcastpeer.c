@@ -205,7 +205,7 @@ static void* PeerThread(void* arg)
     KeySocket_SetSockOpt(peer->txfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
 #endif
 
-    ret = KeySocket_Bind(peer->rxfd, &gAnyAddr, GROUP_PORT);
+    ret = KeySocket_Bind(peer->rxfd, &gAnyAddr, GROUP_PORT, 1);
     if (ret < 0) {
         perror("rx bind failed");
         goto exit;

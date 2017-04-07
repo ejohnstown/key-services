@@ -166,19 +166,30 @@ int KeySocket_Connect(KS_SOCKET_T sockfd, const struct in_addr* srvAddr, const u
 
 
 int KeySocket_Bind(KS_SOCKET_T sockFd, const struct in_addr* listenAddr,
-    const unsigned short listenPort)
+    const unsigned short listenPort, int isUdp)
 {
     int ret = 0;
 
 #ifdef HAVE_NETX
-    (void)sockFd;
     (void)listenAddr;
-    (void)listenPort;
-    /* NetX doesn't bind the socket to a port on the server side. You
-     * just listen to the port. */
+    if (isUdp) {
+        ret = nx_udp_socket_bind((NX_UDP_SOCKET*)sockFd,
+                                 listenPort, NX_WAIT_FOREVER);
+    }
+    else {
+        ret = nx_tcp_client_socket_bind(sockFd, listenPort, NX_WAIT_FOREVER);
+    }
+
+    if (ret != NX_SUCCESS) {
+#if KEY_SOCKET_LOGGING_LEVEL >= 1
+        printf("Fatal error: bind error %d\n", ret);
+#endif
+        ret = -1;
+    }
 #else
     struct sockaddr_in servAddr;
 
+    (void)isUdp;
     /* set up server address and port */
     XMEMSET(&servAddr, 0, sizeof(servAddr));
     servAddr.sin_family      = AF_INET;
@@ -213,6 +224,19 @@ int KeySocket_SetNonBlocking(KS_SOCKET_T sockFd)
     return ret;
 }
 
+int KeySocket_SetBroadcast(KS_SOCKET_T sockFd)
+{
+    int ret = 0;
+#ifdef NETX
+    (void)sockFd;
+    /* Broacast depends on address, not option. */
+#else
+    int opt = 1;
+    ret = KeySocket_SetSockOpt(sockFd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+#endif
+
+    return ret;
+}
 
 int KeySocket_Listen(KS_SOCKET_T sockFd, unsigned short listenPort, int listenMaxQueue)
 {

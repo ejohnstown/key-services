@@ -34,7 +34,7 @@ unsigned int LowResTimer(void)
  * threads used to demonstrate the DTLS Multicast. */
 
 #define KS_PRINTF bsp_debug_printf
-#define KS_STACK_SZ (6 * 1024)
+#define KS_STACK_SZ (4 * 1024)
 #define KS_PRIORITY 15
 #define KS_THRESHOLD 15
 #define KS_MEMORY_POOL_SZ KS_STACK_SZ
@@ -82,9 +82,10 @@ static unsigned char gKeyServerMemory[KS_MEMORY_POOL_SZ];
 static TX_MUTEX gKeyStateMutex;
 static UINT gKeySet = 0;
 static UINT gGetNewKey = 1;
+static UINT gFindMaster = 1;
 static KeyRespPacket_t gKeyState;
 
-static struct in_addr keySrvAddr = { IP_ADDRESS(192,168,2,1) };
+static struct in_addr gKeySrvAddr = { 0 };
 
 extern NX_IP* nxIp;
 
@@ -156,7 +157,9 @@ KeyServerEntry(ULONG ignore)
 /* KeyServerUdpEntry
  * Thread entry point to drive the key server's UDP beacon. Key server
  * really shouldn't ever return, but the return code is checked and
- * reported, just in case. */
+ * reported, just in case. First it waits for the network interface to
+ * become ready, then it calls the self-contained KeyServer's UDP
+ * server, which handles the beacon. */
 static void
 KeyServerUdpEntry(ULONG ignore)
 {
@@ -176,7 +179,9 @@ KeyServerUdpEntry(ULONG ignore)
 
 
 /* KeyClientEntry
- * Thread entry point to drive the key client. */
+ * Thread entry point to drive the key client. It initializes wolfSSL for
+ * its use, waits for the network interface to be ready, then it loops
+ * trying to get key updates. */
 static void
 KeyClientEntry(ULONG ignore)
 {
@@ -199,10 +204,19 @@ KeyClientEntry(ULONG ignore)
     while (1) {
         tx_thread_sleep(KS_TIMEOUT_KEY_CLIENT);
 
-        if (status == TX_SUCCESS && gGetNewKey) {
-            result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+        if (status == TX_SUCCESS && gFindMaster) {
+            result = KeyClient_FindMaster(&gKeySrvAddr, NULL);
             if (result != 0) {
-                KS_PRINTF("Key retrieval failed\n");
+                KS_PRINTF("Key server didn't announce itself.\n");
+                continue;
+            }
+            gFindMaster = 0;
+        }
+
+        if (status == TX_SUCCESS && gKeySrvAddr.s_addr != 0 && gGetNewKey) {
+            result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, NULL);
+            if (result != 0) {
+                KS_PRINTF("Unable to retrieve key\n");
                 continue;
             }
 
@@ -395,8 +409,7 @@ WolfLocalInit(void)
                               KS_PRIORITY, KS_THRESHOLD,
                               TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-        KS_PRINTF("key %s thread create failed = 0x%02X\n",
-                  "server udp", status);
+        KS_PRINTF("key server udp thread create failed = 0x%02X\n", status);
         return;
     }
 
@@ -406,7 +419,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-        KS_PRINTF("key %s thread create failed = 0x%02X\n", "server", status);
+        KS_PRINTF("key server thread create failed = 0x%02X\n", status);
         return;
     }
 
@@ -416,7 +429,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-        KS_PRINTF("key %s thread create failed = 0x%02X\n", "client", status);
+        KS_PRINTF("key client thread create failed = 0x%02X\n", status);
         return;
     }
 

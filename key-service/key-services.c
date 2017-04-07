@@ -327,7 +327,12 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
 int KeyServer_RunUdp(void* heap)
 {
     int                 ret = 0;
+#ifdef HAVE_NETX
+    NX_UDP_SOCKET realSock;
+    KS_SOCKET_T listenfd = (KS_SOCKET_T)&realSock;
+#else
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
+#endif
     const unsigned long inAddrAny = INADDR_ANY;
     int n;
     CmdReqPacket_t reqPkt;
@@ -348,15 +353,10 @@ int KeyServer_RunUdp(void* heap)
     KeySocket_SetNonBlocking(listenfd);
 
     /* enable broadcast */
-#ifndef NETX
-    {
-        int opt = 1;
-        KeySocket_SetSockOpt(listenfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
-    }
-#endif
+    KeySocket_SetBroadcast(listenfd);
 
     /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_BCAST_PORT);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_BCAST_PORT, 1);
     if (ret != 0)
         goto exit;
 
@@ -464,7 +464,7 @@ int KeyServer_Run(void* heap)
     }
 
     /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_SERV_PORT);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_SERV_PORT, 0);
     if (ret == 0) {
         ret = KeySocket_Listen(listenfd, KEY_SERV_PORT, LISTENQ);
     }
@@ -822,12 +822,7 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     }
 
     /* enable broadcast */
-#ifndef NETX
-    {
-        int opt = 1;
-        KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
-    }
-#endif
+    KeySocket_SetBroadcast(sockfd);
 
     /* build request */
     XMEMSET(&reqPkt, 0, sizeof(reqPkt));
@@ -838,7 +833,25 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     XMEMSET(&clientAddr, 0, sizeof(clientAddr));
     clientAddr.sin_family = AF_INET;
     clientAddr.sin_port = htons(KEY_BCAST_PORT);
+#ifndef HAVE_NETX
     clientAddr.sin_addr = *srvAddr;
+#else
+    (void)srvAddr;
+    {
+        /* Derive and set broadcast address. */
+        ULONG addr = 0, mask = 0;
+
+        ret = nx_ip_address_get(nxIp, &addr, &mask);
+        if (ret != NX_SUCCESS) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("KeyClient_GetNetUdp Error: ip address get %d\n", ret);
+        #endif
+            ret = -1;
+            goto exit;
+        }
+        clientAddr.sin_addr.s_addr = addr | 0xFF;
+    }
+#endif
 
     /* send broadcast */
     ret = KeySocket_SendTo(sockfd, (char*)req, sizeof(reqPkt), 0,
