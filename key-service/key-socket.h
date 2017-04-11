@@ -114,6 +114,7 @@ int  KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags, st
 void KeySocket_Unlisten(const unsigned short srvPort);
 void KeySocket_Unbind(KS_SOCKET_T sockfd);
 void KeySocket_Close(KS_SOCKET_T* pSockfd);
+void KeySocket_CloseUdp(KS_SOCKET_T* pSockfd);
 void KeySocket_Delete(KS_SOCKET_T* pSockfd);
 
 int KeySocket_aton(const char *cp, struct in_addr *ap);

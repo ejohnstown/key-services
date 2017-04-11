@@ -5,7 +5,7 @@
 #include "key-services.h"
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#define KEY_SERVICE_LOGGING_LEVEL   2
+#define KEY_SERVICE_LOGGING_LEVEL   0
 
 #define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
@@ -782,7 +782,9 @@ exit:
 #endif
 
     wolfSSL_shutdown(ssl);
+    KeySocket_Unbind(sockfd);
     KeySocket_Close(&sockfd);
+    KeySocket_Delete(&sockfd);
 
     /* cleanup */
     wolfSSL_free(ssl);
@@ -799,8 +801,8 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
 {
     int ret;
 #ifdef HAVE_NETX
-    NX_TCP_SOCKET realSock;
-    KS_SOCKET_T sockfd = &realSock;
+    NX_UDP_SOCKET realSock;
+    KS_SOCKET_T sockfd = (KS_SOCKET_T)&realSock;
 #else
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
 #endif
@@ -837,6 +839,11 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     clientAddr.sin_addr = *srvAddr;
 #else
     (void)srvAddr;
+    ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr, KEY_BCAST_PORT, 1);
+    if (ret != NX_SUCCESS) {
+        goto exit;
+    }
+
     {
         /* Derive and set broadcast address. */
         ULONG addr = 0, mask = 0;
@@ -901,11 +908,11 @@ exit:
 
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
     if (ret != 0) {
-        printf("Key Client failure: %d\n", ret);
+        printf("Key Client UDP failure: %d\n", ret);
     }
 #endif
 
-    KeySocket_Close(&sockfd);
+    KeySocket_CloseUdp(&sockfd);
 
     return ret;
 }

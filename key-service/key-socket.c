@@ -5,7 +5,7 @@
 #include "key-socket.h"
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#define KEY_SOCKET_LOGGING_LEVEL   2
+#define KEY_SOCKET_LOGGING_LEVEL   0
 
 #ifdef HAVE_NETX
     #define printf bsp_debug_printf
@@ -485,7 +485,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
     unsigned int ret;
     int error = 0;
 
-    ret = nx_udp_socket_receive(nxSock, &nxPacket, NX_NO_WAIT);
+    ret = nx_udp_socket_receive(nxSock, &nxPacket, 50);
     if (ret != NX_SUCCESS) {
         error = 1;
         /* This may be due to a non-block. Report the error later. */
@@ -704,7 +704,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     }
 
     if (!error) {
-        sent = (int)nx_udp_socket_send(nxSock, nxPacket,
+        ret = nx_udp_socket_send(nxSock, nxPacket,
             addrIn->sin_addr.s_addr, addrIn->sin_port);
         if (ret != NX_SUCCESS) {
             error = 1;
@@ -725,6 +725,8 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
         #endif
         }
     }
+    else
+        sent = sz;
 
     (void)addrSz;
     (void)flags;
@@ -775,6 +777,19 @@ void KeySocket_Delete(KS_SOCKET_T* pSockfd)
     if (*pSockfd != KS_SOCKET_T_INIT) {
 #ifdef HAVE_NETX
         nx_tcp_socket_delete(*pSockfd);
+#else
+        close(*pSockfd);
+#endif
+        *pSockfd = KS_SOCKET_T_INIT;
+    }
+}
+
+void KeySocket_CloseUdp(KS_SOCKET_T* pSockfd)
+{
+    if (*pSockfd != KS_SOCKET_T_INIT) {
+#ifdef HAVE_NETX
+        nx_udp_socket_unbind((NX_UDP_SOCKET*)*pSockfd);
+        nx_udp_socket_delete((NX_UDP_SOCKET*)*pSockfd);
 #else
         close(*pSockfd);
 #endif

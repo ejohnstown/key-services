@@ -5,6 +5,7 @@
 #include "key-services.h"
 #include "wolfcast.h"
 
+#define KEY_SERVICE_LOGGING_LEVEL 3
 
 /* mySeed() and LowResTimer() are application defined functions
  * needed by wolfSSL. */
@@ -84,8 +85,6 @@ static UINT gKeySet = 0;
 static UINT gGetNewKey = 1;
 static UINT gFindMaster = 1;
 static KeyRespPacket_t gKeyState;
-
-static struct in_addr gKeySrvAddr = { 0 };
 
 extern NX_IP* nxIp;
 
@@ -186,52 +185,103 @@ static void
 KeyClientEntry(ULONG ignore)
 {
     int result;
+    int findMaster = 0;
+    int getNewKey = 0;
+    int storeKey = 0;
     UINT status = TX_SUCCESS;
     KeyRespPacket_t keyResp;
+    struct in_addr keySrvAddr = { 0 };
 
     (void)ignore;
 
     result = wolfSSL_Init();
     if (result != SSL_SUCCESS) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
         KS_PRINTF("KeyClient couldn't initialize wolfSSL. (%d)\n", result);
+#endif
         return;
     }
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
         KS_PRINTF("Key Service client waiting for network.\n");
+#endif
     }
 
     while (1) {
-        tx_thread_sleep(KS_TIMEOUT_KEY_CLIENT);
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+        KS_PRINTF("Key client loop start\n");
+#endif
+        if (!findMaster && !getNewKey && !storeKey) {
+            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
+            if (status == TX_SUCCESS) {
+                findMaster = gFindMaster;
+                gFindMaster = 0;
+                getNewKey = gGetNewKey;
+                gGetNewKey = 0;
+                tx_mutex_put(&gKeyStateMutex);
+            }
+            else {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+                KS_PRINTF("Couldn't get key state mutex to read\n");
+#endif
+            }
+        }
 
-        if (status == TX_SUCCESS && gFindMaster) {
-            result = KeyClient_FindMaster(&gKeySrvAddr, NULL);
+        if (findMaster) {
+            result = KeyClient_FindMaster(&keySrvAddr, NULL);
             if (result != 0) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
-                continue;
+#endif
             }
-            gFindMaster = 0;
+            else {
+                findMaster = 0;
+            }
         }
 
-        if (status == TX_SUCCESS && gKeySrvAddr.s_addr != 0 && gGetNewKey) {
-            result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, NULL);
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+        KS_PRINTF("Key client between things.\n");
+#endif
+
+        if (!findMaster && getNewKey && !storeKey) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+            KS_PRINTF("Key client getting key.\n");
+#endif
+            result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
             if (result != 0) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
                 KS_PRINTF("Unable to retrieve key\n");
-                continue;
+#endif
             }
-
-            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
-            if (status != TX_SUCCESS) {
-                KS_PRINTF("Key client couldn't get state mutex\n");
-            }
-            memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
-            gKeySet = 1;
-            gGetNewKey = 0;
-            status = tx_mutex_put(&gKeyStateMutex);
-            if (status != TX_SUCCESS) {
-                KS_PRINTF("Key client couldn't put state mutex\n");
+            else {
+                getNewKey = 0;
+                storeKey = 1;
             }
         }
+
+        if (storeKey) {
+            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
+            if (status == TX_SUCCESS) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+                KS_PRINTF("Key client got key\n");
+#endif
+                memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
+                gKeySet = 1;
+                storeKey = 0;
+                tx_mutex_put(&gKeyStateMutex);
+            }
+            else {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+                KS_PRINTF("Couldn't get key state mutex to write\n");
+#endif
+            }
+        }
+
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+        KS_PRINTF("Key client sleeping\n");
+#endif
+        tx_thread_sleep(KS_TIMEOUT_KEY_CLIENT);
     }
 }
 
@@ -277,7 +327,7 @@ static void
 WolfCastClientEntry(ULONG ignore)
 {
     SocketInfo_t socketInfo; /* Used in the WOLFSSL object. */
-    WOLFSSL_CTX *ctx; /* Used in the WOLFSSL object. */
+    WOLFSSL_CTX *ctx = NULL; /* Used in the WOLFSSL object. */
     WOLFSSL *curSsl = NULL;
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
@@ -297,7 +347,9 @@ WolfCastClientEntry(ULONG ignore)
         KS_PRINTF("wolfCast thread waiting for network.\n");
     }
 
+wolfSSL_Debugging_ON();
     error = WolfcastInit(1, CLIENT_ID, &ctx, &socketInfo);
+    KS_PRINTF("ctx = %p\n", ctx);
     if (!error) {
         error = WolfcastClientInit(&txTime, &txCount);
     }
@@ -314,25 +366,33 @@ WolfCastClientEntry(ULONG ignore)
         keySet = 0;
         while (!keySet) {
             KS_PRINTF("wolfCast thread waiting for first key.\n");
-
-            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
-            if (status == TX_SUCCESS) {
-                keySet = gKeySet;
-                tx_mutex_put(&gKeyStateMutex);
-            }
-
             tx_thread_sleep(KS_TIMEOUT_WOLFCAST_KEY_POLL);
+
+            status = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
+            if (status == TX_SUCCESS) {
+                KS_PRINTF("wolfCast getting key set flag\n");
+                keySet = gKeySet;
+                status = tx_mutex_put(&gKeyStateMutex);
+                KS_PRINTF("put mutext = %d\n", status);
+            }
+            else {
+                KS_PRINTF("Couldn't get key mutex. Trying again.\n");
+            }
         }
         keySet = 0;
     }
+KS_PRINTF("Entering loop\n");
 
     while (1) {
+KS_PRINTF("WolfCast Loop Start %d\n", error);
+
         if (!error) {
             WOLFSSL *newSsl = NULL;
             unsigned short newEpoch;
 
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
+KS_PRINTF("Locked!\n");
                 if (gKeySet) {
                     keySet = 1;
                     gKeySet = 0;
@@ -340,8 +400,10 @@ WolfCastClientEntry(ULONG ignore)
                 }
                 status = tx_mutex_put(&gKeyStateMutex);
             }
+//#if 0
+            if (status == TX_SUCCESS && keySet) {
+KS_PRINTF("Unlocked!\n");
 
-            if (status == TX_SUCCESS) {
                 error = WolfcastSessionNew(&newSsl, ctx, &socketInfo, 1,
                         peerIdList, sizeof(peerIdList) / sizeof(peerIdList[0]));
             }
@@ -373,7 +435,8 @@ WolfCastClientEntry(ULONG ignore)
         if (!error)
             error = WolfcastClient(&socketInfo, curSsl, prevSsl, epoch,
                                    CLIENT_ID, &txTime, &txCount);
-
+//#endif
+//        }
         tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
 }
@@ -402,7 +465,7 @@ WolfLocalInit(void)
         KS_PRINTF("key state mutex create failed = 0x%02X\n", status);
         return;
     }
-
+#if 0
     status = tx_thread_create(&gKeyServerUdpThread, "key service udp server",
                               KeyServerUdpEntry, 0,
                               gKeyServerUdpStack, sizeof(gKeyServerUdpStack),
@@ -422,7 +485,7 @@ WolfLocalInit(void)
         KS_PRINTF("key server thread create failed = 0x%02X\n", status);
         return;
     }
-
+#endif
     status = tx_thread_create(&gKeyClientThread, "key service client",
                            KeyClientEntry, 0,
                            gKeyClientStack, sizeof(gKeyClientStack),
