@@ -323,7 +323,7 @@ sequenceCb(
 
     status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
     if (status != TX_SUCCESS) {
-#ifdef WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFCAST_LOGGING_LEVEL >= 1
         KS_PRINTF("wolfCast callback couldn't get state mutex\n");
 #endif
     }
@@ -332,7 +332,7 @@ sequenceCb(
 
         status = tx_mutex_put(&gKeyStateMutex);
         if (status != TX_SUCCESS) {
-#ifdef WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFCAST_LOGGING_LEVEL >= 1
             KS_PRINTF("wolfCast callback couldn't put state mutex\n");
 #endif
         }
@@ -369,7 +369,7 @@ WolfCastClientEntry(ULONG ignore)
     (void)ignore;
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
-#ifdef WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("wolfCast thread waiting for network.\n");
 #endif
     }
@@ -383,7 +383,7 @@ WolfCastClientEntry(ULONG ignore)
         result = wolfSSL_CTX_mcast_set_highwater_cb(ctx, 5, 0, 0, sequenceCb);
         if (result != SSL_SUCCESS) {
             error = 1;
-#ifdef WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFCAST_LOGGING_LEVEL >= 1
             KS_PRINTF("set mcast highwater cb error\n");
 #endif
         }
@@ -392,21 +392,21 @@ WolfCastClientEntry(ULONG ignore)
     if (!error) {
         keySet = 0;
         while (!keySet) {
-#ifdef WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFCAST_LOGGING_LEVEL >= 3
             KS_PRINTF("wolfCast thread waiting for first key.\n");
 #endif
             tx_thread_sleep(KS_TIMEOUT_WOLFCAST_KEY_POLL);
 
             status = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
             if (status == TX_SUCCESS) {
-#ifdef WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFCAST_LOGGING_LEVEL >= 3
                 KS_PRINTF("wolfCast getting key set flag\n");
 #endif
                 keySet = gKeySet;
                 status = tx_mutex_put(&gKeyStateMutex);
             }
             else {
-#ifdef WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFCAST_LOGGING_LEVEL >= 3
                 KS_PRINTF("Couldn't get key mutex. Trying again.\n");
 #endif
             }
@@ -443,7 +443,7 @@ WolfCastClientEntry(ULONG ignore)
                                 keyState.suite);
                 if (result != SSL_SUCCESS) {
                     error = 1;
-#ifdef WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     KS_PRINTF("Couldn't set the session secret\n");
 #endif
                 }
@@ -481,7 +481,7 @@ WolfLocalInit(void)
     benchmark_test(NULL);
 
     if (KeySocket_Init() != 0) {
-#ifdef WOLFLOCAL_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("couldn't initialize the KeySocket\n");
 #endif
         return;
@@ -490,7 +490,7 @@ WolfLocalInit(void)
     status = tx_mutex_create(&gKeyStateMutex, "key state mutex",
                              TX_NO_INHERIT);
     if (status != TX_SUCCESS) {
-#ifdef WOLFLOCAL_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("key state mutex create failed = 0x%02X\n", status);
 #endif
         return;
@@ -502,7 +502,7 @@ WolfLocalInit(void)
                               KS_PRIORITY, KS_THRESHOLD,
                               TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#ifdef WOLFLOCAL_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("key server udp thread create failed = 0x%02X\n", status);
 #endif
         return;
@@ -514,7 +514,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#ifdef WOLFLOCAL_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("key server thread create failed = 0x%02X\n", status);
 #endif
         return;
@@ -526,7 +526,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#ifdef WOLFLOCAL_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("key client thread create failed = 0x%02X\n", status);
 #endif
         return;
@@ -538,7 +538,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#ifdef WOLFLOCAL_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("wolfCast client thread create failed = 0x%02X\n", status);
 #endif
         return;
