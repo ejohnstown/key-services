@@ -9,12 +9,14 @@
     #define KEY_SERVICE_LOGGING_LEVEL   0
 #endif
 
-#define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
+//#define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
 //#define TEST_KEY_ROLL
 
 #ifdef HAVE_NETX
-    #define printf bsp_debug_printf
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        #define printf bsp_debug_printf
+    #endif
     #define htons(x) (x)
     extern NX_IP *nxIp;
 
@@ -433,18 +435,21 @@ int KeyServer_Run(void* heap)
     WOLFSSL*            ssl = NULL;
 #ifdef HAVE_NETX
     NX_TCP_SOCKET tcpSock;
-
-    /* Extra lifting for NETX sockets */
-    listenfd = &tcpSock;
-    connfd = &tcpSock;
-#endif
+#else
     const unsigned long inAddrAny = INADDR_ANY;
+#endif
     CmdReqPacket_t reqPkt;
     unsigned char* req = (unsigned char*)&reqPkt;
     unsigned char* resp;
     int n;
 #ifdef TEST_KEY_ROLL
     int keyFlag = 0;
+#endif
+
+#ifdef HAVE_NETX
+    /* Extra lifting for NETX sockets */
+    listenfd = &tcpSock;
+    connfd = &tcpSock;
 #endif
 
     /* init ctx */
@@ -466,7 +471,11 @@ int KeyServer_Run(void* heap)
     }
 
     /* setup socket listener */
+#ifndef HAVE_NETX
+    /* nx_tcp_socket_listen() binds the socket, so we shouldn't explicitly
+     * bind it first. */
     ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_SERV_PORT, 0);
+#endif
     if (ret == 0) {
         ret = KeySocket_Listen(listenfd, KEY_SERV_PORT, LISTENQ);
     }
@@ -933,7 +942,7 @@ static int KeyClient_GetLocal(int reqType, unsigned char* msg, int* msgLen,
     reqPkt.header.type = reqType;
 
     /* check request */
-    ret = KeyReq_Check(&reqPkt);
+    ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
     if (ret != 0) {
         return ret;
     }
