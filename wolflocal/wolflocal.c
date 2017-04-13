@@ -5,16 +5,6 @@
 #include "key-services.h"
 #include "wolfcast.h"
 
-/* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#ifndef KEY_SERVICE_LOGGING_LEVEL
-    #define KEY_SERVICE_LOGGING_LEVEL 0
-#endif
-#ifndef WOLFCAST_LOGGING_LEVEL
-    #define WOLFCAST_LOGGING_LEVEL 0
-#endif
-#ifndef WOLFLOCAL_LOGGIG_LEVEL
-    #define WOLFLOCAL_LOGGING_LEVEL 0
-#endif
 
 /* mySeed() and LowResTimer() are application defined functions
  * needed by wolfSSL. */
@@ -31,7 +21,6 @@ int mySeed(unsigned char* output, unsigned int sz)
     }
 
     return 0;
-
 }
 
 
@@ -40,10 +29,26 @@ unsigned int LowResTimer(void)
     return(tx_time_get() / 100);
 }
 
+
 /* The rest of this file is the start up code and entry points for the
  * threads used to demonstrate the DTLS Multicast. */
 
-#define KS_PRINTF bsp_debug_printf
+/* 0=None, 1=Errors, 2=Verbose, 3=Debug */
+#ifndef KEY_SERVICE_LOGGING_LEVEL
+    #define KEY_SERVICE_LOGGING_LEVEL 0
+#endif
+#ifndef WOLFCAST_LOGGING_LEVEL
+    #define WOLFCAST_LOGGING_LEVEL 0
+#endif
+#ifndef WOLFLOCAL_LOGGIG_LEVEL
+    #define WOLFLOCAL_LOGGING_LEVEL 0
+#endif
+
+#if KEY_SERVICE_LOGGING_LEVEL >= 1 || \
+    WOLFCAST_LOGGING_LEVEL >= 1 || WOLFLOCAL_LOGGING_LEVEL >= 1
+    #define KS_PRINTF bsp_debug_printf
+#endif
+
 #define KS_STACK_SZ (4 * 1024)
 #define KS_PRIORITY 15
 #define KS_THRESHOLD 15
