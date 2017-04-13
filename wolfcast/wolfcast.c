@@ -27,6 +27,7 @@
 
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
+#define WOLFCAST_LOGGING_LEVEL 3
 #ifndef WOLFCAST_LOGGING_LEVEL
     #define WOLFCAST_LOGGING_LEVEL 0
 #endif
@@ -968,7 +969,12 @@ WolfcastClient(SocketInfo_t *si,
                 int n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
                 if (n < 0) {
                     n = wolfSSL_get_error(ssl, n);
-                    if (n != SSL_ERROR_WANT_READ) {
+                    if (n == VERIFY_MAC_ERROR || n == DECRYPT_ERROR) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        WCPRINTF("Allowable DTLS error. Ignoring a message.\n");
+#endif
+                    }
+                    else if (n != SSL_ERROR_WANT_READ) {
                         error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR(wolfSSL_ERR_reason_error_string(n));
@@ -1025,7 +1031,12 @@ WolfcastClient(SocketInfo_t *si,
                 n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
                 if (n < 0) {
                     n = wolfSSL_get_error(ssl, n);
-                    if (n != SSL_ERROR_WANT_READ) {
+                    if (n == VERIFY_MAC_ERROR || n == DECRYPT_ERROR) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        WCPRINTF("Allowable DTLS error. Ignoring a message.\n");
+#endif
+                    }
+                    else if (n != SSL_ERROR_WANT_READ) {
                         error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR(wolfSSL_ERR_reason_error_string(n));
