@@ -40,7 +40,7 @@ unsigned int LowResTimer(void)
 #ifndef WOLFCAST_LOGGING_LEVEL
     #define WOLFCAST_LOGGING_LEVEL 0
 #endif
-#ifndef WOLFLOCAL_LOGGIG_LEVEL
+#ifndef WOLFLOCAL_LOGGING_LEVEL
     #define WOLFLOCAL_LOGGING_LEVEL 0
 #endif
 
