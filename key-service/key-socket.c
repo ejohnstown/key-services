@@ -5,7 +5,9 @@
 #include "key-socket.h"
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#define KEY_SOCKET_LOGGING_LEVEL   0
+#ifndef KEY_SOCKET_LOGGING_LEVEL
+    #define KEY_SOCKET_LOGGING_LEVEL   0
+#endif
 
 #ifdef HAVE_NETX
     #define printf bsp_debug_printf

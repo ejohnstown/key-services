@@ -26,6 +26,12 @@
 #include "key-services.h"
 
 
+/* 0=None, 1=Errors, 2=Verbose, 3=Debug */
+#ifndef WOLFCAST_LOGGING_LEVEL
+    #define WOLFCAST_LOGGING_LEVEL 0
+#endif
+
+
 #ifndef NETX
 
     #include <stdlib.h>
@@ -48,13 +54,17 @@
         return (unsigned int)time(NULL);
     }
 
+#if WOLFCAST_LOGGING_LEVEL >= 3
     #define WCPRINTF printf
+#endif
 
+#if WOLFCAST_LOGGING_LEVEL >= 1
     static void WCERR(const char *msg)
     {
         if (msg != NULL)
             fprintf(stderr, "error: %s\n", msg);
     }
+#endif
 
     #define GROUP_ADDR "226.0.0.3"
     #define GROUP_PORT 12345
@@ -79,7 +89,9 @@ BufferDtlsRxCallback(
 
     if (ctx == NULL || buf == NULL || sz <= 0) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("receive callback invalid parameters");
+#endif
     }
 
     if (!error) {
@@ -89,7 +101,9 @@ BufferDtlsRxCallback(
 
         if (packet == NULL || packetSz == 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("receive callback no rx packet");
+#endif
         }
     }
 
@@ -100,7 +114,9 @@ BufferDtlsRxCallback(
     }
     else {
         sz = WOLFSSL_CBIO_ERR_GENERAL;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("rx error");
+#endif
     }
 
     return sz;
@@ -114,7 +130,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     if (si == NULL) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("no socket info");
+#endif
     }
 
     if (!error) {
@@ -126,7 +144,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         si->txFd = socket(AF_INET, SOCK_DGRAM, 0);
         if (si->txFd < 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("unable to create tx socket");
+#endif
         }
     }
 
@@ -134,7 +154,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->txFd, SOL_SOCKET, SO_REUSEADDR,
                        &on, sizeof(on)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't set tx reuse addr");
+#endif
         }
     }
 #ifdef SO_REUSEPORT
@@ -142,7 +164,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->txFd, SOL_SOCKET, SO_REUSEPORT,
                        &on, sizeof(on)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't set tx reuse port");
+#endif
         }
     }
 #endif
@@ -157,7 +181,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->txFd, IPPROTO_IP, IP_MULTICAST_IF,
                     (const void*)&addr, sizeof(addr)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("setsockopt mc set multicast interface failed");
+#endif
         }
     }
 
@@ -169,7 +195,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->txFd, IPPROTO_IP, IP_MULTICAST_LOOP,
                        &off, sizeof(off)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't disable multicast loopback");
+#endif
         }
     }
 
@@ -177,7 +205,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         si->rxFd = socket(AF_INET, SOCK_DGRAM, 0);
         if (si->rxFd < 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("unable to create rx socket");
+#endif
         }
     }
 
@@ -185,7 +215,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->rxFd, SOL_SOCKET, SO_REUSEADDR,
                        &on, (unsigned int)sizeof(on)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't set rx reuse addr");
+#endif
         }
     }
 #ifdef SO_REUSEPORT
@@ -193,7 +225,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->rxFd, SOL_SOCKET, SO_REUSEPORT,
                        &on, (unsigned int)sizeof(on)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't set rx reuse port");
+#endif
         }
     }
 #endif
@@ -209,7 +243,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
                  (struct sockaddr*)&rxAddr, sizeof(rxAddr)) != 0) {
 
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("rx bind failed");
+#endif
         }
     }
 
@@ -228,14 +264,18 @@ CreateSockets(SocketInfo_t* si, int isClient)
         if (setsockopt(si->rxFd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                        (const void*)&imreq, sizeof(imreq)) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("setsockopt mc add membership failed");
+#endif
         }
     }
 
     if (!error) {
         if (fcntl(si->rxFd, F_SETFL, O_NONBLOCK) == -1) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("set nonblock failed");
+#endif
         }
     }
 
@@ -249,13 +289,17 @@ CreateSockets(SocketInfo_t* si, int isClient)
         return (unsigned int)bsp_fast_timer_uptime() / 1000000;
     }
 
+#if WOLFCAST_LOGGING_LEVEL >= 3
     #define WCPRINTF bsp_debug_printf
+#endif
 
+#if WOLFCAST_LOGGING_LEVEL >= 1
     static void WCERR(const char *msg)
     {
         if (msg != NULL)
             bsp_debug_printf("error: %s\n", msg);
     }
+#endif
 
     #define GROUP_ADDR 0xE2000003
     #define GROUP_PORT 12345
@@ -275,7 +319,9 @@ NetxDtlsTxCallback(
     (void)ssl;
     if (ctx == NULL || buf == NULL) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("transmit callback invalid parameters");
+#endif
     }
 
     if (!error) {
@@ -284,7 +330,9 @@ NetxDtlsTxCallback(
         ret = nx_packet_allocate(si->pool, &pkt, NX_UDP_PACKET, NX_WAIT_FOREVER);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't allocate packet wrapper");
+#endif
         }
     }
 
@@ -292,7 +340,9 @@ NetxDtlsTxCallback(
         ret = nx_packet_data_append(pkt, buf, sz, si->pool, NX_WAIT_FOREVER);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't append data to packet");
+#endif
         }
     }
 
@@ -301,7 +351,9 @@ NetxDtlsTxCallback(
                                  si->ipAddr, si->port);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("tx error");
+#endif
         }
     }
 
@@ -311,7 +363,9 @@ NetxDtlsTxCallback(
         /* In case of error, release packet. */
         ret = nx_packet_release(pkt);
         if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't release packet");
+#endif
         }
     }
 
@@ -334,7 +388,9 @@ NetxDtlsRxCallback(
     (void)ssl;
     if (ctx == NULL || buf == NULL || sz <= 0) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("receive callback invalid parameters");
+#endif
     }
 
     if (!error) {
@@ -344,14 +400,18 @@ NetxDtlsRxCallback(
         ret = nx_packet_length_get(pkt, &rxSz);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't get packet length");
+#endif
         }
     }
 
     if (!error) {
         if (rxSz > (unsigned long)sz) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("receive packet too large for buffer");
+#endif
         }
     }
 
@@ -359,7 +419,9 @@ NetxDtlsRxCallback(
         ret = nx_packet_data_retrieve(pkt, buf, &rxSz);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't retrieve packet");
+#endif
         }
     }
 
@@ -367,7 +429,9 @@ NetxDtlsRxCallback(
         ret = nx_packet_release(pkt);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't release packet");
+#endif
         }
     }
 
@@ -380,7 +444,9 @@ NetxDtlsRxCallback(
             sz = WOLFSSL_CBIO_ERR_WANT_READ;
         else {
             sz = WOLFSSL_CBIO_ERR_GENERAL;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("rx error");
+#endif
         }
     }
 
@@ -396,7 +462,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     if (si == NULL) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("no socket info");
+#endif
     }
 
     if (!error) {
@@ -411,12 +479,15 @@ CreateSockets(SocketInfo_t* si, int isClient)
 #endif
         ret = nx_udp_enable(si->ip);
         if (ret == NX_ALREADY_ENABLED) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
             WCPRINTF("UDP already enabled\n");
+#endif
         }
         else if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("cannot enable UDP");
-            WCPRINTF("cannot enable UDP ret = %u\n", ret);
+#endif
         }
     }
 
@@ -424,11 +495,15 @@ CreateSockets(SocketInfo_t* si, int isClient)
         ret = nx_igmp_enable(si->ip);
 
         if (ret == NX_ALREADY_ENABLED) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
             WCPRINTF("IGMP already enabled\n");
+#endif
         }
         else if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("cannot enable IGMP");
+#endif
         }
     }
 
@@ -439,7 +514,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
                                    NX_IP_TIME_TO_LIVE, 30);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("unable to create tx socket");
+#endif
         }
     }
 
@@ -447,7 +524,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         ret = nx_udp_socket_bind(&si->txSocket, NX_ANY_PORT, NX_NO_WAIT);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("tx bind failed");
+#endif
         }
     }
 
@@ -459,7 +538,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't disable multicast loopback");
+#endif
         }
     }
 
@@ -470,7 +551,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
                                    NX_IP_TIME_TO_LIVE, 30);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("unable to create rx socket");
+#endif
         }
     }
 
@@ -478,7 +561,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         ret = nx_udp_socket_bind(&si->rxSocket, GROUP_PORT, NX_NO_WAIT);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("rx bind failed");
+#endif
         }
     }
 
@@ -486,7 +571,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
         ret = nx_igmp_multicast_join(si->ip, GROUP_ADDR);
         if (ret != NX_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("setsockopt mc add membership failed");
+#endif
         }
     }
 
@@ -500,10 +587,17 @@ const char seqHwCbCtx[] = "Callback context string.";
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
 {
+#if WOLFCAST_LOGGING_LEVEL >= 3
     const char* ctxStr = (const char*)ctx;
 
     WCPRINTF("Highwater Callback (%u:%u/%u): %s\n", peerId, curSeq, maxSeq,
           ctxStr != NULL ? ctxStr : "Forgot to set the callback context.");
+#else
+    (void)peerId;
+    (void)maxSeq;
+    (void)curSeq;
+    (void)ctx;
+#endif
 
     return 0;
 }
@@ -546,14 +640,18 @@ WolfcastSessionNew(WOLFSSL **ssl, WOLFSSL_CTX *ctx,
         (isClient && (peerIdList == NULL || peerIdListSz == 0))) {
 
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("WolfcastSessionNew invalid parameters");
+#endif
     }
 
     if (!error) {
         *ssl = wolfSSL_new(ctx);
         if (*ssl == NULL) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("ssl new error");
+#endif
         }
     }
 
@@ -566,7 +664,9 @@ WolfcastSessionNew(WOLFSSL **ssl, WOLFSSL_CTX *ctx,
         ret = wolfSSL_set_write_fd(*ssl, si->txFd);
         if (ret != SSL_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("set ssl write fd error");
+#endif
         }
     }
 
@@ -574,7 +674,9 @@ WolfcastSessionNew(WOLFSSL **ssl, WOLFSSL_CTX *ctx,
         ret = wolfSSL_dtls_set_peer(*ssl, &si->tx, si->txSz);
         if (ret != SSL_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("set ssl sender error");
+#endif
         }
     }
 #else
@@ -590,7 +692,9 @@ WolfcastSessionNew(WOLFSSL **ssl, WOLFSSL_CTX *ctx,
             ret = wolfSSL_mcast_set_highwater_ctx(*ssl, (void*)seqHwCbCtx);
             if (ret != SSL_SUCCESS) {
                 error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                 WCERR("set highwater ctx error");
+#endif
             }
         }
 
@@ -600,7 +704,9 @@ WolfcastSessionNew(WOLFSSL **ssl, WOLFSSL_CTX *ctx,
                 ret = wolfSSL_mcast_peer_add(*ssl, peerIdList[i], 0);
                 if (ret != SSL_SUCCESS) {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("mcast add peer error");
+#endif
                     break;
                 }
             }
@@ -632,14 +738,18 @@ WolfcastInit(
 
     if (ctx == NULL) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("WolfcastInit invalid parameters");
+#endif
     }
 
     if (!error) {
         ret = KeySocket_Init();
         if (ret != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("Couldn't initialize key service sockets");
+#endif
         }
     }
 
@@ -651,14 +761,19 @@ WolfcastInit(
         ret = wolfSSL_Init();
         if (ret != SSL_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't initialize wolfSSL");
+#endif
         }
     }
 
     if (!error) {
         error = CreateSockets(si, isClient);
-        if (error)
+        if (error) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't create sockets");
+#endif
+        }
     }
 
 #ifndef WOLFSSL_STATIC_MEMORY
@@ -677,7 +792,9 @@ WolfcastInit(
 
         if (*ctx == NULL) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("ctx new error");
+#endif
         }
     }
 #else
@@ -697,7 +814,9 @@ WolfcastInit(
 
             if (ret != SSL_SUCCESS) {
                 error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                 WCERR("unable to load static memory and create ctx");
+#endif
             }
         }
     }
@@ -709,7 +828,9 @@ WolfcastInit(
                 WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
         if (ret != SSL_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("unable to load static IO memory to ctx");
+#endif
         }
     }
 #endif
@@ -718,7 +839,9 @@ WolfcastInit(
         ret = wolfSSL_CTX_mcast_set_member_id(*ctx, myId);
         if (ret != SSL_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("set mcast member id error");
+#endif
         }
     }
 
@@ -735,7 +858,9 @@ WolfcastInit(
         ret = wolfSSL_CTX_mcast_set_highwater_cb(*ctx, 100, 10, 20, seq_cb);
         if (ret != SSL_SUCCESS) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("set mcast highwater cb error");
+#endif
         }
     }
 
@@ -819,7 +944,9 @@ WolfcastClient(SocketInfo_t *si,
     if (curSsl == NULL || txtime == NULL || count == NULL) {
         /* prevSsl is allowed to be NULL, and is checked later. */
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("WolfcastClient bad parameters");
+#endif
     }
 
     if (!error) {
@@ -843,21 +970,30 @@ WolfcastClient(SocketInfo_t *si,
                     n = wolfSSL_get_error(ssl, n);
                     if (n != SSL_ERROR_WANT_READ) {
                         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR(wolfSSL_ERR_reason_error_string(n));
+#endif
                     }
                 }
-                else
+                else {
+#if WOLFCAST_LOGGING_LEVEL >= 3
                     WCPRINTF("got msg from peer %u %s\n", peerId, msg);
+#endif
+                }
             }
             else {
+#if WOLFCAST_LOGGING_LEVEL >= 3
                 WCPRINTF("Ignoring message from previous Epoch.\n");
+#endif
             }
 
             if (si->rxPacket != NULL) {
                 status = nx_packet_release(si->rxPacket);
                 if (status != NX_SUCCESS) {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("couldn't release packet");
+#endif
                 }
                 si->rxPacket = NULL;
             }
@@ -875,7 +1011,9 @@ WolfcastClient(SocketInfo_t *si,
             si->rxPacket = packet;
             si->rxPacketSz = (unsigned long)n;
             epoch = GetEpoch(packet);
+#if WOLFCAST_LOGGING_LEVEL >= 3
             WCPRINTF("current epoch = %u, received epoch = %u\n", curEpoch, epoch);
+#endif
             if (epoch == curEpoch)
                 ssl = curSsl;
             else if (epoch == curEpoch - 1)
@@ -889,14 +1027,21 @@ WolfcastClient(SocketInfo_t *si,
                     n = wolfSSL_get_error(ssl, n);
                     if (n != SSL_ERROR_WANT_READ) {
                         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR(wolfSSL_ERR_reason_error_string(n));
+#endif
                     }
                 }
-                else
+                else {
+#if WOLFCAST_LOGGING_LEVEL >= 3
                     WCPRINTF("got msg from peer %u %s\n", peerId, msg);
+#endif
+                }
             }
             else {
+#if WOLFCAST_LOGGING_LEVEL >= 3
                 WCPRINTF("Ignoring message from previous Epoch.\n");
+#endif
             }
         }
 #endif
@@ -916,7 +1061,9 @@ WolfcastClient(SocketInfo_t *si,
             if (n < 0) {
                 error = 1;
                 n = wolfSSL_get_error(curSsl, n);
+#if WOLFCAST_LOGGING_LEVEL >= 1
                 WCERR(wolfSSL_ERR_reason_error_string(n));
+#endif
             }
             else
                 *txtime = WolfcastClientUpdateTimeout(rxtime);
@@ -938,7 +1085,9 @@ WolfcastServer(WOLFSSL *ssl)
 
     if (ssl == NULL) {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("WolfcastServer bad parameters");
+#endif
     }
 
     if (!error) {
@@ -947,13 +1096,17 @@ WolfcastServer(WOLFSSL *ssl)
         int n;
 
         sprintf(msg, "time is %us", WCTIME());
+#if WOLFCAST_LOGGING_LEVEL >= 3
         WCPRINTF("sending msg = %s\n", msg);
+#endif
         msg_len = (unsigned int)strlen(msg) + 1;
         n = wolfSSL_write(ssl, msg, msg_len);
         if (n < 0) {
             error = 1;
             n = wolfSSL_get_error(ssl, n);
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR(wolfSSL_ERR_reason_error_string(n));
+#endif
         }
     }
 
@@ -995,14 +1148,18 @@ main(
             isClient = 1;
         else if (strcmp("server", argv[1]) != 0) {
             error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("type must be either client or server");
+#endif
         }
 
         if (!error) {
             if ((isClient && argc != 4) || (!isClient && argc != 3)) {
                 error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 3
                 WCPRINTF("Usage: wolfcast client <id> <peer list>\n"
                          "       wolfcast server <id>\n");
+#endif
             }
         }
 
@@ -1012,7 +1169,9 @@ main(
                 myId = n;
             else {
                 error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                 WCERR("id must be between 0 and 255, inclusive");
+#endif
             }
         }
 
@@ -1023,7 +1182,9 @@ main(
             do {
                 if (peerIdListSz == PEER_ID_LIST_SZ) {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("too many peer ids");
+#endif
                     break;
                 }
 
@@ -1037,7 +1198,9 @@ main(
                 }
                 else {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("peer ids must be between 0 and 255, inclusive");
+#endif
                     break;
                 }
             }
@@ -1046,14 +1209,18 @@ main(
     }
     else {
         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 3
         WCPRINTF("Usage: wolfcast client <id> <peer list>\n"
                  "       wolfcast server <id>\n");
+#endif
     }
 
     if (!error) {
         error = WolfcastInit(isClient, myId, &ctx, &si);
         if (error) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("Couldn't initialize wolfCast.");
+#endif
         }
     }
 
@@ -1082,7 +1249,9 @@ main(
                     ret = KeyClient_FindMaster(&keySrvAddr, NULL);
                     if (ret != 0) {
                         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("unable to find master");
+#endif
                     }
                     addr = (unsigned char*)&keySrvAddr.s_addr;
                     printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
@@ -1092,7 +1261,9 @@ main(
                     ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
                     if (ret != 0) {
                         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("Key retrieval failed");
+#endif
                     }
                 }
 
@@ -1101,13 +1272,17 @@ main(
                                                peerIdList, peerIdListSz);
 
                     if (error || newSsl == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("Couldn't create new ssl object.");
+#endif
                     }
                 }
 
                 if (!error) {
                     newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
+#if WOLFCAST_LOGGING_LEVEL >= 3
                     WCPRINTF("key set newEpoch = %u\n", newEpoch);
+#endif
                     ret = wolfSSL_set_secret(newSsl, newEpoch,
                                              keyResp.pms, sizeof(keyResp.pms),
                                              keyResp.clientRandom,
@@ -1115,12 +1290,16 @@ main(
                                     keyResp.suite);
                     if (ret != SSL_SUCCESS) {
                         error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("Couldn't set the session secret");
+#endif
                     }
                 }
 
                 if (!error) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
                     WCPRINTF("Key has been set.\n");
+#endif
                     if (prevSsl != NULL)
                         wolfSSL_free(prevSsl);
                     prevSsl = curSsl;
@@ -1138,7 +1317,9 @@ main(
             ret = select(si.rxFd+1, &readfds, NULL, NULL, &timeout);
             if (ret < 0) {
                 error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                 WCERR("main select failed");
+#endif
                 break;
             }
 
@@ -1159,23 +1340,31 @@ main(
             WOLFSSL *newSsl;
             KeyRespPacket_t keyResp;
             unsigned short newEpoch;
-            unsigned char* addr;
 
             if (!error) {
                 ret = KeyClient_FindMaster(&keySrvAddr, NULL);
                 if (ret != 0) {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("unable to find master");
+#endif
                 }
-                addr = (unsigned char*)&keySrvAddr.s_addr;
-                printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                {
+                    unsigned char* addr;
+                    addr = (unsigned char*)&keySrvAddr.s_addr;
+                    WCPRINTF("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+                }
+#endif
             }
 
             if (!error) {
                 ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
                 if (ret != 0) {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("Key retrieval failed");
+#endif
                 }
             }
 
@@ -1183,7 +1372,9 @@ main(
                 error = WolfcastSessionNew(&newSsl, ctx, &si, 0, NULL, 0);
 
                 if (error || newSsl == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("Couldn't create new ssl object.");
+#endif
                 }
             }
 
@@ -1195,10 +1386,14 @@ main(
                                 keyResp.suite);
                 if (ret != SSL_SUCCESS) {
                     error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
                     WCERR("Couldn't set the session secret");
+#endif
                 }
                 else {
+#if WOLFCAST_LOGGING_LEVEL >= 3
                     WCPRINTF("Key has been set.\n");
+#endif
                     if (prevSsl != NULL)
                         wolfSSL_free(prevSsl);
                     prevSsl = curSsl;

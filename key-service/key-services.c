@@ -5,7 +5,9 @@
 #include "key-services.h"
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#define KEY_SERVICE_LOGGING_LEVEL   0
+#ifndef KEY_SERVICE_LOGGING_LEVEL
+    #define KEY_SERVICE_LOGGING_LEVEL   0
+#endif
 
 #define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
