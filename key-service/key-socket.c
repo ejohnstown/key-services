@@ -10,7 +10,9 @@
 #endif
 
 #ifdef HAVE_NETX
-    #define printf bsp_debug_printf
+    #if KEY_SOCKET_LOGGING_LEVEL >= 1
+        #define printf bsp_debug_printf
+    #endif
     NX_IP *nxIp = NULL; /* XXX This needed to be global for a bit. */
     NX_PACKET_POOL *nxPool = NULL;
 #endif

@@ -554,7 +554,9 @@ int KeyServer_Run(void* heap)
             /* XXX Hack to force updates. Check against 2 if adding the linux peer */
             if (keyFlag == 1) {
                 gKeyServerInitDone = 0;
+            #if KEY_SERVICE_LOGGING_LEVEL >= 3
                 printf("Updating the key.\n");
+            #endif
                 KeyServer_GenNewKey(heap);
                 keyFlag = 0;
             }
