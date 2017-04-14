@@ -937,7 +937,9 @@ static int KeyClient_GetLocal(int reqType, unsigned char* msg, int* msgLen,
     int ret;
     unsigned char* resp;
     int n;
+    CmdRespPacket_t* respPkt;
     CmdReqPacket_t reqPkt;
+    unsigned short size;
 
     XMEMSET(&reqPkt, 0, sizeof(reqPkt));
     reqPkt.header.version = CMD_PKT_VERSION;
@@ -950,14 +952,19 @@ static int KeyClient_GetLocal(int reqType, unsigned char* msg, int* msgLen,
     }
 
     KeyReq_GetResp(reqType, &resp, &n);
+    respPkt = (CmdRespPacket_t*)resp;
+    ato16(respPkt->header.size, &size);
 
     /* return only length provided */
-    if (n > *msgLen)
-        n = *msgLen;
+    if (size > n - sizeof(CmdPacketHeader_t))
+        size = n - sizeof(CmdPacketHeader_t);
 
-    memcpy(msg, resp, n);
+    if (size > *msgLen)
+        size = *msgLen;
 
-    *msgLen = n;
+    XMEMCPY(msg, respPkt->msg.raw, size);
+
+    *msgLen = size;
 
     (void)heap;
 
