@@ -811,7 +811,7 @@ WolfcastInit(
         if (method != NULL) {
             ret = wolfSSL_CTX_load_static_memory(
                     ctx, method,
-                    memory, sizeof(memory), 0, 1);
+                    memory, sizeof(memory), 0, 2);
 
             if (ret != SSL_SUCCESS) {
                 error = 1;
@@ -826,7 +826,7 @@ WolfcastInit(
         /* load in a buffer for IO */
         ret = wolfSSL_CTX_load_static_memory(
                 ctx, NULL, memoryIO, sizeof(memoryIO),
-                WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
+                WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 2);
         if (ret != SSL_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
