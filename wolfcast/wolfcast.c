@@ -1255,17 +1255,23 @@ main(
                 iteration = 20;
 
                 if (!error) {
-                    unsigned char* addr;
-
+                    unsigned char addr[4] = {KEY_BCAST_ADDR};
+                    memcpy(&keySrvAddr.s_addr, addr, sizeof(addr));
                     ret = KeyClient_FindMaster(&keySrvAddr, NULL);
                     if (ret != 0) {
-                        error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("unable to find master");
 #endif
+                        /* XXX the recv timing out here, which is normal, is
+                         * treated as an error. That's not right. But that's
+                         * also not really the current problem. */
                     }
-                    addr = (unsigned char*)&keySrvAddr.s_addr;
-                    printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+                    if (!error) {
+                        memcpy(addr, &keySrvAddr.s_addr, sizeof(addr));
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        WCPRINTF("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+#endif
+                    }
                 }
 
                 if (!error) {

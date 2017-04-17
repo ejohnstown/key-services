@@ -850,10 +850,15 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     clientAddr.sin_port = htons(KEY_BCAST_PORT);
 #ifndef HAVE_NETX
     clientAddr.sin_addr = *srvAddr;
+    {
+        struct timeval to = {0, 500000};
+        KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                             &to, sizeof(to));
+    }
 #else
     (void)srvAddr;
     ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr, KEY_BCAST_PORT, 1);
-    if (ret != NX_SUCCESS) {
+    if (ret != 0) {
         goto exit;
     }
 

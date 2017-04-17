@@ -235,9 +235,6 @@ KeyClientEntry(ULONG ignore)
     }
 
     while (1) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
-        KS_PRINTF("Key client loop start\n");
-#endif
         if (!findMaster && !getNewKey && !storeKey) {
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
@@ -265,10 +262,6 @@ KeyClientEntry(ULONG ignore)
                 findMaster = 0;
             }
         }
-
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
-        KS_PRINTF("Key client between things.\n");
-#endif
 
         if (!findMaster && getNewKey && !storeKey) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 3
@@ -304,9 +297,6 @@ KeyClientEntry(ULONG ignore)
             }
         }
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
-        KS_PRINTF("Key client sleeping\n");
-#endif
         tx_thread_sleep(KS_TIMEOUT_KEY_CLIENT);
     }
 }
