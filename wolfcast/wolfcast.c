@@ -1252,8 +1252,6 @@ main(
                 KeyRespPacket_t keyResp;
                 unsigned short newEpoch;
 
-                iteration = 20;
-
                 if (!error) {
                     unsigned char addr[4] = {KEY_BCAST_ADDR};
                     memcpy(&keySrvAddr.s_addr, addr, sizeof(addr));
@@ -1265,6 +1263,8 @@ main(
                         /* XXX the recv timing out here, which is normal, is
                          * treated as an error. That's not right. But that's
                          * also not really the current problem. */
+                        sleep(1);
+                        continue;
                     }
                     if (!error) {
                         memcpy(addr, &keySrvAddr.s_addr, sizeof(addr));
@@ -1325,6 +1325,8 @@ main(
                 }
 
                 memset(&keyResp, 0, sizeof(keyResp));
+
+                iteration = 20;
             }
             else
                 iteration--;
