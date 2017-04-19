@@ -398,6 +398,13 @@ NetxDtlsRxCallback(
         si = (SocketInfo_t*)ctx;
         pkt = si->rxPacket;
 
+        if (pkt == NULL) {
+            error = 1;
+            ret = NX_NO_PACKET;
+        }
+    }
+
+    if (!error) {
         ret = nx_packet_length_get(pkt, &rxSz);
         if (ret != NX_SUCCESS) {
             error = 1;
@@ -584,6 +591,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
 #endif
 
 
+static int rekeyTrigger = 1;
 const char seqHwCbCtx[] = "Callback context string.";
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
@@ -599,6 +607,8 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
     (void)curSeq;
     (void)ctx;
 #endif
+
+    rekeyTrigger = 1;
 
     return 0;
 }
@@ -1238,7 +1248,6 @@ main(
     if (isClient) {
 #ifndef NO_WOLFCAST_CLIENT
         unsigned int txtime, count;
-        int iteration = 0;
 
         if (!error)
             error = WolfcastClientInit(&txtime, &count);
@@ -1247,7 +1256,7 @@ main(
             fd_set readfds;
             struct timeval timeout = {0, 500000};
 
-            if (iteration == 0) {
+            if (rekeyTrigger) {
                 WOLFSSL *newSsl;
                 KeyRespPacket_t keyResp;
                 unsigned short newEpoch;
@@ -1260,11 +1269,10 @@ main(
 #if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("unable to find master");
 #endif
-                        /* XXX the recv timing out here, which is normal, is
+                        /* The recv times out here, which is normal, is
                          * treated as an error. That's not right. But that's
                          * also not really the current problem. */
-                        sleep(1);
-                        continue;
+                        goto skipRekey;
                     }
                     if (!error) {
                         memcpy(addr, &keySrvAddr.s_addr, sizeof(addr));
@@ -1277,10 +1285,26 @@ main(
                 if (!error) {
                     ret = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
                     if (ret != 0) {
-                        error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
                         WCERR("Key retrieval failed");
 #endif
+                        goto skipRekey;
+                    }
+                }
+
+                if (!error) {
+                    newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
+                    if (newEpoch > epoch) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        WCPRINTF("key set newEpoch = %u\n", newEpoch);
+#endif
+                    }
+                    else {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        WCPRINTF("Ignoring already used epoch.\n");
+#endif
+                        rekeyTrigger = 0;
+                        goto skipRekey;
                     }
                 }
 
@@ -1296,15 +1320,11 @@ main(
                 }
 
                 if (!error) {
-                    newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                    WCPRINTF("key set newEpoch = %u\n", newEpoch);
-#endif
                     ret = wolfSSL_set_secret(newSsl, newEpoch,
                                              keyResp.pms, sizeof(keyResp.pms),
                                              keyResp.clientRandom,
-                                    keyResp.serverRandom,
-                                    keyResp.suite);
+                                             keyResp.serverRandom,
+                                             keyResp.suite);
                     if (ret != SSL_SUCCESS) {
                         error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -1324,12 +1344,10 @@ main(
                     epoch = newEpoch;
                 }
 
+                rekeyTrigger = 0;
+skipRekey:
                 memset(&keyResp, 0, sizeof(keyResp));
-
-                iteration = 20;
             }
-            else
-                iteration--;
 
             FD_ZERO(&readfds);
             FD_SET(si.rxFd, &readfds);
@@ -1360,6 +1378,7 @@ main(
             KeyRespPacket_t keyResp;
             unsigned short newEpoch;
 
+            /* The wolfCast server keys once. */
             if (!error) {
                 ret = KeyClient_FindMaster(&keySrvAddr, NULL);
                 if (ret != 0) {
