@@ -52,10 +52,8 @@ static unsigned short gKeyServerEpoch;
          * will use a local buffer in the function since there can
          * be multiple clients. */
         static MEMORY_SECTION byte clientMemory[80000];
-        static MEMORY_SECTION byte clientMemoryIO[34500];
     #endif
     static MEMORY_SECTION byte serverMemory[80000];
-    static MEMORY_SECTION byte serverMemoryIO[34500];
 #endif
 
 enum {
@@ -290,17 +288,6 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("Error: unable to load static memory and create ctx\n");
     #endif
-    }
-    else {
-        /* load in a buffer for IO */
-        ret = wolfSSL_CTX_load_static_memory(
-                &ctx, NULL, serverMemoryIO, sizeof(serverMemoryIO),
-                WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
-        if (ret != SSL_SUCCESS) {
-        #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("Error: unable to load static IO memory and create ctx\n");
-        #endif
-        }
     }
 #endif
 
@@ -707,7 +694,6 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
 #else
     #ifdef WOLFSSL_STATIC_MEMORY
         byte clientMemory[80000];
-        byte clientMemoryIO[34500];
     #endif
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
 #endif
@@ -729,18 +715,8 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     #endif
         goto exit;
     }
-
-    /* load in a buffer for IO */
-    ret = wolfSSL_CTX_load_static_memory(
-            &ctx, NULL, clientMemoryIO, sizeof(clientMemoryIO),
-            WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
-    if (ret != SSL_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("unable to load static IO memory and create ctx\n");
-    #endif
-        goto exit;
-    }
 #endif
+
     if (ctx == NULL) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("wolfSSL_CTX_new error\n");

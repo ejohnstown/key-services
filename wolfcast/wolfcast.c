@@ -624,7 +624,6 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
         #define MEMORY_SECTION
     #endif
     MEMORY_SECTION unsigned char memory[80000];
-    MEMORY_SECTION unsigned char memoryIO[34500];
 #endif
 
 
@@ -829,19 +828,6 @@ WolfcastInit(
                 WCERR("unable to load static memory and create ctx");
 #endif
             }
-        }
-    }
-
-    if (!error) {
-        /* load in a buffer for IO */
-        ret = wolfSSL_CTX_load_static_memory(
-                ctx, NULL, memoryIO, sizeof(memoryIO),
-                WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 2);
-        if (ret != SSL_SUCCESS) {
-            error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-            WCERR("unable to load static IO memory to ctx");
-#endif
         }
     }
 #endif
