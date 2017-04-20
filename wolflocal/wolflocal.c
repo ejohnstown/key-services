@@ -99,6 +99,7 @@ static UINT gKeySet = 0;
 static UINT gGetNewKey = 1;
 static UINT gFindMaster = 1;
 static KeyRespPacket_t gKeyState;
+static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 
 extern NX_IP* nxIp;
 
@@ -129,7 +130,6 @@ static void
 KeyServerEntry(ULONG ignore)
 {
     int result;
-    WOLFSSL_HEAP_HINT *heap;
 
     (void)ignore;
 
@@ -141,7 +141,7 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == SSL_SUCCESS) {
-        result = wc_LoadStaticMemory(&heap,
+        result = wc_LoadStaticMemory(&gHeapHint,
                                      gKeyServerMemory, sizeof(gKeyServerMemory),
                                      WOLFMEM_GENERAL, 1);
         if (result != 0) {
@@ -152,7 +152,7 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
-        result = KeyServer_Init(heap);
+        result = KeyServer_Init(gHeapHint);
         if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
             KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
@@ -161,7 +161,7 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
-        result = KeyServer_Run(heap);
+        result = KeyServer_Run(gHeapHint);
         if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
             KS_PRINTF("KeyServer terminated. (%d)\n", result);
@@ -169,7 +169,7 @@ KeyServerEntry(ULONG ignore)
         }
     }
 
-    KeyServer_Free(heap);
+    KeyServer_Free(gHeapHint);
 
     wolfSSL_Cleanup();
 }
@@ -323,7 +323,17 @@ sequenceCb(
 #endif
     }
     else {
-        gGetNewKey = 1;
+        if (curSeq >= maxSeq) {
+            gGetNewKey = 1;
+        }
+        else {
+            int ret = KeyServer_GenNewKey(gHeapHint);
+            if (ret != 0) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("wolfCast callback couldn't generate new key\n");
+#endif
+            }
+        }
 
         status = tx_mutex_put(&gKeyStateMutex);
         if (status != TX_SUCCESS) {
@@ -375,7 +385,7 @@ WolfCastClientEntry(ULONG ignore)
     }
 
     if (!error) {
-        result = wolfSSL_CTX_mcast_set_highwater_cb(ctx, 5, 0, 0, sequenceCb);
+        result = wolfSSL_CTX_mcast_set_highwater_cb(ctx, 10, 8, 0, sequenceCb);
         if (result != SSL_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -425,13 +435,30 @@ WolfCastClientEntry(ULONG ignore)
             }
 
             if (status == TX_SUCCESS && keySet) {
-                error = WolfcastSessionNew(&newSsl, ctx, &socketInfo, 1,
-                        peerIdList, sizeof(peerIdList) / sizeof(peerIdList[0]));
+                newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
+
+                if (newEpoch > epoch) {
+                    error = WolfcastSessionNew(&newSsl, ctx,
+                                  &socketInfo, 1,
+                                  peerIdList,
+                                  sizeof(peerIdList) / sizeof(peerIdList[0]));
+                }
+                else {
+                    keySet = 0;
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                    KS_PRINTF("Ignoring old epoch.\n");
+#endif
+                }
+
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                if (error) {
+                    KS_PRINTF("Couldn't create new session\n");
+                }
+#endif
             }
 
             if (!error && newSsl != NULL && keySet) {
                 keySet = 0;
-                newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
                 result = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyState.pms, sizeof(keyState.pms),
                                 keyState.clientRandom, keyState.serverRandom,
@@ -446,8 +473,12 @@ WolfCastClientEntry(ULONG ignore)
                 memset(&keyState, 0, sizeof(keyState));
 
                 if (!error) {
-                    if (prevSsl != NULL)
+                    if (prevSsl != NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        KS_PRINTF("Releasing old session.\n");
+#endif
                         wolfSSL_free(prevSsl);
+                    }
                     prevSsl = curSsl;
                     curSsl = newSsl;
                     epoch = newEpoch;
