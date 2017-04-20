@@ -866,7 +866,7 @@ WolfcastInit(
     }
 
     if (!error && isClient) {
-        ret = wolfSSL_CTX_mcast_set_highwater_cb(*ctx, 100, 10, 20, seq_cb);
+        ret = wolfSSL_CTX_mcast_set_highwater_cb(*ctx, 15, 0, 0, seq_cb);
         if (ret != SSL_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -999,7 +999,7 @@ WolfcastClient(SocketInfo_t *si,
             }
             else {
 #if WOLFCAST_LOGGING_LEVEL >= 3
-                WCPRINTF("Ignoring message from previous Epoch.\n");
+                WCPRINTF("Ignoring message unknown Epoch.\n");
 #endif
             }
 
@@ -1349,18 +1349,18 @@ skipRekey:
                 memset(&keyResp, 0, sizeof(keyResp));
             }
 
-            FD_ZERO(&readfds);
-            FD_SET(si.rxFd, &readfds);
-            ret = select(si.rxFd+1, &readfds, NULL, NULL, &timeout);
-            if (ret < 0) {
-                error = 1;
+            if (curSsl != NULL) {
+                FD_ZERO(&readfds);
+                FD_SET(si.rxFd, &readfds);
+                ret = select(si.rxFd+1, &readfds, NULL, NULL, &timeout);
+                if (ret < 0) {
+                    error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
-                WCERR("main select failed");
+                    WCERR("main select failed");
 #endif
-                break;
-            }
+                    break;
+                }
 
-            if (FD_ISSET(si.rxFd, &readfds)) {
                 error = WolfcastClient(&si,
                                        curSsl, prevSsl,
                                        epoch, myId,
