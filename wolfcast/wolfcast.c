@@ -852,7 +852,7 @@ WolfcastInit(
     }
 
     if (!error && isClient) {
-        ret = wolfSSL_CTX_mcast_set_highwater_cb(*ctx, 15, 0, 0, seq_cb);
+        ret = wolfSSL_CTX_mcast_set_highwater_cb(*ctx, 8, 0, 0, seq_cb);
         if (ret != SSL_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -959,7 +959,12 @@ WolfcastClient(SocketInfo_t *si,
 
             epoch = GetEpoch(nxPacket);
             si->rxPacket = nxPacket;
-            ssl = (epoch == curEpoch) ? curSsl : prevSsl;
+            if (epoch == curEpoch)
+                ssl = curSsl;
+            else if (epoch < curEpoch)
+                ssl = prevSsl;
+            else if (epoch > curEpoch)
+                rekeyTrigger = 1;
 
             if (ssl != NULL) {
                 int n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
@@ -1006,7 +1011,7 @@ WolfcastClient(SocketInfo_t *si,
 
         n = recvfrom(si->rxFd, packet, sizeof(packet), 0, NULL, 0);
         if (n > 0) {
-            WOLFSSL *ssl;
+            WOLFSSL *ssl = NULL;
             unsigned short peerId;
             unsigned short epoch;
 
@@ -1018,10 +1023,10 @@ WolfcastClient(SocketInfo_t *si,
 #endif
             if (epoch == curEpoch)
                 ssl = curSsl;
-            else if (epoch == curEpoch - 1)
+            else if (epoch < curEpoch)
                 ssl = prevSsl;
-            else
-                ssl = NULL;
+            else if (epoch > curEpoch)
+                rekeyTrigger = 1;
 
             if (ssl != NULL) {
                 n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
@@ -1294,6 +1299,14 @@ main(
                     }
                 }
 
+                if (prevSsl != NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                        WCPRINTF("Releasing previous ssl object.");
+#endif
+                    wolfSSL_free(prevSsl);
+                    prevSsl = NULL;
+                }
+
                 if (!error) {
                     error = WolfcastSessionNew(&newSsl, ctx, &si, 1,
                                                peerIdList, peerIdListSz);
@@ -1323,8 +1336,6 @@ main(
 #if WOLFCAST_LOGGING_LEVEL >= 3
                     WCPRINTF("Key has been set.\n");
 #endif
-                    if (prevSsl != NULL)
-                        wolfSSL_free(prevSsl);
                     prevSsl = curSsl;
                     curSsl = newSsl;
                     epoch = newEpoch;
