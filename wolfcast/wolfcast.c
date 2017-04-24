@@ -27,7 +27,6 @@
 
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#define WOLFCAST_LOGGING_LEVEL 3
 #ifndef WOLFCAST_LOGGING_LEVEL
     #define WOLFCAST_LOGGING_LEVEL 0
 #endif
