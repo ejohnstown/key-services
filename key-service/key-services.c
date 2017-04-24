@@ -107,7 +107,7 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
     CmdRespPacket_t* resp = &gRespPkt[type];
 
     /* get random data for message bytes */
-    ret = wc_InitRng_ex(&rng, heap);
+    ret = wc_InitRng_ex(&rng, heap, 0);
     if (ret == 0) {
         ret = wc_RNG_GenerateBlock(&rng, resp->msg.raw, MAX_PACKET_MSG);
         if (ret != 0) {
