@@ -49,10 +49,10 @@ unsigned int LowResTimer(void)
     #define KS_PRINTF bsp_debug_printf
 #endif
 
-#define KS_STACK_SZ (4 * 1024)
+#define KS_MEMORY_POOL_SZ 4096
+#define KS_STACK_SZ 4096
 #define KS_PRIORITY 15
 #define KS_THRESHOLD 15
-#define KS_MEMORY_POOL_SZ KS_STACK_SZ
 
 #define KS_TIMEOUT_1SEC 100
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
@@ -88,6 +88,8 @@ static char gKeyServerUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[KS_STACK_SZ];
 static unsigned char gKeyServerMemory[KS_MEMORY_POOL_SZ];
+/* The key server memory buffer is used for the RNG and the key service
+ * messages. */
 
 /* Mutex for controlling the current key state. The Key
  * Client thread will be writing to the key state and

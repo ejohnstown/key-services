@@ -51,9 +51,9 @@ static unsigned short gKeyServerEpoch;
         /* Under NetX we'll have only one client thread. Non-NetX
          * will use a local buffer in the function since there can
          * be multiple clients. */
-        static MEMORY_SECTION byte clientMemory[80000];
+        static MEMORY_SECTION byte clientMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
     #endif
-    static MEMORY_SECTION byte serverMemory[80000];
+    static MEMORY_SECTION byte serverMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
 #endif
 
 enum {

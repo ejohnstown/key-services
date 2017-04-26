@@ -622,7 +622,7 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
     #else
         #define MEMORY_SECTION
     #endif
-    MEMORY_SECTION unsigned char memory[80000];
+    MEMORY_SECTION unsigned char memory[WOLFLOCAL_STATIC_MEMORY_SZ];
 #endif
 
 

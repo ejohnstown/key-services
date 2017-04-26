@@ -30,6 +30,7 @@
 #define NO_64BIT
 #define BIG_ENDIAN_ORDER
 #define USER_TICKS
+#define WOLFSSL_DTLS_ALLOW_FUTURE
 
 #define THREADX
 #define HAVE_THREADX
@@ -40,6 +41,27 @@
 /* For wolftest, benchmark, and wolfcast */
 #define NO_MAIN_DRIVER
 #define BENCH_EMBEDDED
+
+#define LOCAL_ADDR "192.168.2.2"
+#define KEY_SERV_LOCAL_ADDR 192,168,2,2
+#define KEY_BCAST_ADDR 192,168,2,255
+
+#if 0
+#define KEY_SOCKET_LOGGING_LEVEL 3
+#define KEY_SERVICE_LOGGING_LEVEL 3
+#define WOLFCAST_LOGGING_LEVEL 3
+#define DEBUG_WOLFSSL
+#define WOLFSSL_DEBUG_MEMORY
+#endif
+#define WOLFCAST_LOGGING_LEVEL 3
+
+#define WOLFSSL_MAX_MTU 256
+#define WOLFMEM_BUCKETS 64,128,256,384,1024,4544
+#define WOLFMEM_DIST 14,4,6,8,4,4
+#define WOLFMEM_MAX_BUCKETS 6
+/* The static memory size is based on the above constants, and calculated
+ * by the function wolfSSL_StaticBufferSz(). */
+#define WOLFLOCAL_STATIC_MEMORY_SZ 25424
 
 
 int mySeed(unsigned char* output, unsigned int sz);
