@@ -1235,6 +1235,10 @@ main(
         }
     }
 
+    if (!error) {
+        signal(SIGPIPE, SIG_IGN);
+    }
+
     if (isClient) {
 #ifndef NO_WOLFCAST_CLIENT
         unsigned int txtime, count;
