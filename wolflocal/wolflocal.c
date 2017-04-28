@@ -98,7 +98,7 @@ static unsigned char gKeyServerMemory[KS_MEMORY_POOL_SZ];
  * Client to request a new key. */
 static TX_MUTEX gKeyStateMutex;
 static UINT gKeySet = 0;
-static UINT gGetNewKey = 1;
+UINT gGetNewKey = 1;
 static UINT gFindMaster = 1;
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;

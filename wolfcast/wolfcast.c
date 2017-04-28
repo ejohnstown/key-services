@@ -304,6 +304,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
     #define GROUP_ADDR 0xE2000003
     #define GROUP_PORT 12345
 
+extern UINT gGetNewKey;
 
 static int
 NetxDtlsTxCallback(
@@ -962,8 +963,10 @@ WolfcastClient(SocketInfo_t *si,
                 ssl = curSsl;
             else if (epoch < curEpoch)
                 ssl = prevSsl;
-            else if (epoch > curEpoch)
+            else if (epoch > curEpoch) {
                 rekeyTrigger = 1;
+                gGetNewKey = 1;
+            }
 
             if (ssl != NULL) {
                 int n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
