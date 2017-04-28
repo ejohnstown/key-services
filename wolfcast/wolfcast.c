@@ -952,7 +952,7 @@ WolfcastClient(SocketInfo_t *si,
 
         status  = nx_udp_socket_receive(&si->rxSocket, &nxPacket, NX_NO_WAIT);
         if (status == NX_SUCCESS) {
-            WOLFSSL *ssl;
+            WOLFSSL *ssl = NULL;
             unsigned short peerId;
             unsigned short epoch;
 
