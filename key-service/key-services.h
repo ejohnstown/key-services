@@ -46,8 +46,9 @@
 /* Command Packet Types */
 enum CmdPacketCommandType {
     CMD_PKT_TYPE_INVALID = -1,
-    CMD_PKT_TYPE_DISCOVER =  0,
-    CMD_PKT_TYPE_KEY_REQ = 1,
+    CMD_PKT_TYPE_DISCOVER = 0, /* find key servers */
+    CMD_PKT_TYPE_KEY_CHG =  1, /* key server key has changed */
+    CMD_PKT_TYPE_KEY_REQ =  2, /* get key from server */
 
     CMD_PKT_TYPE_COUNT,
 };
@@ -114,7 +115,6 @@ static const unsigned char g_TlsPsk[64] = {
 /* API's */
 int KeyServer_Init(void* heap);
 int KeyServer_Run(void* heap);
-int KeyServer_RunUdp(void* heap); /* Discovery service */
 int KeyServer_IsRunning(void);
 void KeyServer_Stop(void);
 int KeyServer_GenNewKey(void* heap);
@@ -128,5 +128,8 @@ int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* 
 
 int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, void* heap);
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
+
+/* Un-secure UDP broadcast listening service */
+int KeyBcast_RunUdp(const struct in_addr* srvAddr, void* heap);
 
 #endif /* _KEY_SERVICE_H_ */

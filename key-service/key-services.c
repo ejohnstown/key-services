@@ -39,6 +39,7 @@ static volatile int gKeyServerInitDone = 0;
 static int gKeyServerRunning = 0;
 static int gKeyServerStop = 0;
 static unsigned short gKeyServerEpoch;
+static struct in_addr gBcastAddr;
 
 #ifdef WOLFSSL_STATIC_MEMORY
     #if defined(NETX) && defined(PGB002)
@@ -63,7 +64,8 @@ enum {
 
 static const int gRespPrivacy[CMD_PKT_TYPE_COUNT] = {
     CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_DISCOVER */
-    CMD_PKT_PRIVATE /* CMD_PKT_TYPE_KEY_REQ */
+    CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_KEY_CHG */
+    CMD_PKT_PRIVATE,/* CMD_PKT_TYPE_KEY_REQ */
 };
 
 /*
@@ -120,6 +122,8 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
     }
 
     if (ret == 0) {
+        int msgLen = 0;
+
         /* populate generic response packet */
         resp->header.version = CMD_PKT_VERSION;
         resp->header.type = type;
@@ -141,6 +145,9 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
             if (clientRandomSz > RAND_SIZE) clientRandomSz = RAND_SIZE;
             XMEMCPY(resp->msg.keyResp.clientRandom, clientRandom, clientRandomSz);
         }
+
+        /* trigger bcast message for key change */
+        ret = KeyClient_GetUdp(&gBcastAddr, CMD_PKT_TYPE_KEY_CHG, NULL, &msgLen, heap);
     }
 
     return ret;
@@ -159,6 +166,20 @@ static int KeyReq_BuildDiscover(void)
     resp->header.type = type;
     c16toa(ipaddrSz, resp->header.size);
     XMEMCPY(resp->msg.discResp.ipaddr, ipaddr, ipaddrSz);
+
+    return ret;
+}
+
+static int KeyReq_BuildKeyChange(void)
+{
+    int ret = 0;
+    const int type = CMD_PKT_TYPE_KEY_CHG;
+    CmdRespPacket_t* resp = &gRespPkt[type];
+
+    /* populate response packet */
+    resp->header.version = CMD_PKT_VERSION;
+    resp->header.type = type;
+    c16toa(0, resp->header.size);
 
     return ret;
 }
@@ -256,6 +277,12 @@ int KeyServer_Init(void* heap)
             return ret;
 
         ret = KeyReq_BuildDiscover();
+        if (ret != 0)
+            return ret;
+
+        ret = KeyReq_BuildKeyChange();
+        if (ret != 0)
+            return ret;
     }
 
     return ret;
@@ -315,7 +342,7 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
     return ret;
 }
 
-int KeyServer_RunUdp(void* heap)
+int KeyBcast_RunUdp(const struct in_addr* srvAddr, void* heap)
 {
     int                 ret = 0;
 #ifdef HAVE_NETX
@@ -333,6 +360,9 @@ int KeyServer_RunUdp(void* heap)
     socklen_t clientAddrLen;
 
     (void)heap;
+
+    /* copy address to global for key change */
+    XMEMCPY(&gBcastAddr, srvAddr, sizeof(struct in_addr));
 
     /* create socket */
     ret = KeySocket_CreateUdpSocket(&listenfd);
@@ -368,7 +398,7 @@ int KeyServer_RunUdp(void* heap)
             ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
             if (ret != 0) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("KeyServer_RunUdp Error: KeyReq_Check failed %d\n", ret);
+                printf("KeyBcast_RunUdp Error: KeyReq_Check failed %d\n", ret);
             #endif
                 continue;
             }
@@ -381,7 +411,7 @@ int KeyServer_RunUdp(void* heap)
                 (struct sockaddr*)&clientAddr, clientAddrLen);
             if (ret != n) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("KeyServer_RunUdp Error: SendTo %d\n", ret);
+                printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
             #endif
                 continue;
             }
@@ -393,7 +423,7 @@ int KeyServer_RunUdp(void* heap)
         }
         else if (ret < 0) {
         #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyServer_RunUdp Error: RecvFrom %d\n", ret);
+            printf("KeyBcast_RunUdp Error: RecvFrom %d\n", ret);
         #endif
         }
     }
@@ -402,7 +432,7 @@ exit:
 
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
     if (ret != 0) {
-        printf("Key Server UDP failure: %d\n", ret);
+        printf("KeyBcast_RunUdp failure: %d\n", ret);
     }
 #endif
 

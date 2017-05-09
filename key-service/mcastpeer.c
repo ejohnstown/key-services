@@ -349,10 +349,15 @@ static void* KeyServerThread(void* arg)
     return NULL;
 }
 
-static void* KeyServerUdpThread(void* arg)
+static void* KeyBcastUdpThread(void* arg)
 {
     void* heap = arg;
-    KeyServer_RunUdp(heap);
+    const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
+    struct in_addr srvAddr;
+    XMEMCPY(&srvAddr.s_addr, bcast_addr, sizeof(srvAddr.s_addr));
+
+    KeyBcast_RunUdp(&srvAddr, heap);
+
     return NULL;
 }
 
@@ -361,9 +366,9 @@ static int KeyServerStart(pthread_t* tid, pthread_t* tid_udp)
     int ret = 0;
 
     /* start key server on UDP */
-    ret = pthread_create(tid_udp, NULL, KeyServerUdpThread, NULL);
+    ret = pthread_create(tid_udp, NULL, KeyBcastUdpThread, NULL);
     if (ret < 0) {
-        perror("key server UDP pthread_create failed");
+        perror("key broadcast UDP pthread_create failed");
         return ret;
     }
 

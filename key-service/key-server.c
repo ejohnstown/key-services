@@ -2,12 +2,15 @@
 
 #ifndef NETX
     #include <pthread.h>
-    static void* KeyServerUdpThread(void* arg)
+    static void* KeyBcastThread(void* arg)
     {
         int ret;
         void* heap = arg;
+        const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
+        struct in_addr srvAddr;
+        XMEMCPY(&srvAddr.s_addr, bcast_addr, sizeof(srvAddr.s_addr));
 
-        ret = KeyServer_RunUdp(heap);
+        ret = KeyBcast_RunUdp(&srvAddr, heap);
 
         return (void*)((size_t)ret);
     }
@@ -42,8 +45,8 @@ int main(int argc, char **argv)
     }
 
 #ifndef NETX
-    /* spin up another server for UDP */
-    ret = pthread_create(&tid, NULL, KeyServerUdpThread, heap);
+    /* spin up another thread for UDP broadcast */
+    ret = pthread_create(&tid, NULL, KeyBcastThread, heap);
     if (ret < 0) {
         printf("Pthread create failed for UDP\n");
         goto exit;
