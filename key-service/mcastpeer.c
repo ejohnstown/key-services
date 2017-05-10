@@ -349,6 +349,15 @@ static void* KeyServerThread(void* arg)
     return NULL;
 }
 
+static void KeyBcastReqPktCallback(CmdReqPacket_t* reqPkt)
+{
+    if (reqPkt && reqPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+        /* trigger key change */
+        unsigned char* addr = reqPkt->msg.keyResp.ipAddr;
+        printf("Key Change Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+    }
+}
+
 static void* KeyBcastUdpThread(void* arg)
 {
     void* heap = arg;
@@ -356,7 +365,7 @@ static void* KeyBcastUdpThread(void* arg)
     struct in_addr srvAddr;
     XMEMCPY(&srvAddr.s_addr, bcast_addr, sizeof(srvAddr.s_addr));
 
-    KeyBcast_RunUdp(&srvAddr, heap);
+    KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
 
     return NULL;
 }

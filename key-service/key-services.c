@@ -175,11 +175,14 @@ static int KeyReq_BuildKeyChange(void)
     int ret = 0;
     const int type = CMD_PKT_TYPE_KEY_CHG;
     CmdRespPacket_t* resp = &gRespPkt[type];
+    const unsigned char ipaddr[4] = {KEY_SERV_LOCAL_ADDR};
+    int ipaddrSz = sizeof(ipaddr);
 
     /* populate response packet */
     resp->header.version = CMD_PKT_VERSION;
     resp->header.type = type;
-    c16toa(0, resp->header.size);
+    c16toa(ipaddrSz, resp->header.size);
+    XMEMCPY(resp->msg.keyChgResp.ipaddr, ipaddr, ipaddrSz);
 
     return ret;
 }
@@ -342,7 +345,7 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
     return ret;
 }
 
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, void* heap)
+int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap)
 {
     int                 ret = 0;
 #ifdef HAVE_NETX
@@ -403,17 +406,24 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, void* heap)
                 continue;
             }
 
-            /* get response */
-            KeyReq_GetResp(reqPkt.header.type, &resp, &n);
+            /* if we are key server then process incomming requests */
+            if (gKeyServerRunning) {
+                /* get response */
+                KeyReq_GetResp(reqPkt.header.type, &resp, &n);
 
-            /* write response */
-            ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
-                (struct sockaddr*)&clientAddr, clientAddrLen);
-            if (ret != n) {
-            #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
-            #endif
-                continue;
+                /* write response */
+                ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
+                    (struct sockaddr*)&clientAddr, clientAddrLen);
+                if (ret != n) {
+                #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
+                #endif
+                }
+            }
+
+            /* perform callback with request packet */
+            if (reqCb) {
+                reqCb(&reqPkt);
             }
         }
         else if (ret == WOLFSSL_CBIO_ERR_WANT_READ) {
@@ -895,36 +905,39 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
         goto exit;
     }
 
-    /* read response */
-    n = KeySocket_RecvFrom(sockfd, (char*)resp, sizeof(respPkt), 0,
-                             (struct sockaddr*)&clientAddr, &clientAddrLen);
-    if (n <= 0) {
-        ret = n;
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("KeyClient_GetNetUdp: Response error or timeout! %d!\n", ret);
+    /* if we are expecting a response */
+    if (msg && msgLen > 0) {
+        /* read response */
+        n = KeySocket_RecvFrom(sockfd, (char*)resp, sizeof(respPkt), 0,
+                                 (struct sockaddr*)&clientAddr, &clientAddrLen);
+        if (n <= 0) {
+            ret = n;
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("KeyClient_GetNetUdp: Response error or timeout! %d!\n", ret);
+        #endif
+            goto exit;
+        }
+
+        ato16(respPkt.header.size, &size);
+
+    #if KEY_SERVICE_LOGGING_LEVEL >= 2
+        /* show response from the server */
+        printf("Response: Version %d, Cmd %d, Size %d\n",
+                respPkt.header.version, respPkt.header.type, size);
     #endif
-        goto exit;
+
+        /* make sure resposne will fit into buffer */
+        n = size;
+        if (msgLen && n > *msgLen) {
+            n = *msgLen;
+        }
+
+        /* return msg */
+        if (msg)
+            XMEMCPY(msg, respPkt.msg.raw, n);
+        if (msgLen)
+            *msgLen = size;
     }
-
-    ato16(respPkt.header.size, &size);
-
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
-    /* show response from the server */
-    printf("Response: Version %d, Cmd %d, Size %d\n",
-            respPkt.header.version, respPkt.header.type, size);
-#endif
-
-    /* make sure resposne will fit into buffer */
-    n = size;
-    if (msgLen && n > *msgLen) {
-        n = *msgLen;
-    }
-
-    /* return msg */
-    if (msg)
-        XMEMCPY(msg, respPkt.msg.raw, n);
-    if (msgLen)
-        *msgLen = size;
 
     ret = 0; /* success */
 
@@ -969,13 +982,13 @@ static int KeyClient_GetLocal(int reqType, unsigned char* msg, int* msgLen,
     /* return only length provided */
     if (size > n - sizeof(CmdPacketHeader_t))
         size = n - sizeof(CmdPacketHeader_t);
-
-    if (size > *msgLen)
+    if (msgLen && size > *msgLen)
         size = *msgLen;
 
-    XMEMCPY(msg, respPkt->msg.raw, size);
-
-    *msgLen = size;
+    if (msg)
+        XMEMCPY(msg, respPkt->msg.raw, size);
+    if (msgLen)
+        *msgLen = size;
 
     (void)heap;
 
@@ -1029,6 +1042,6 @@ int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, vo
 
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap)
 {
-    int msgLen = sizeof(DiscRespPacket_t);
+    int msgLen = sizeof(AddrRespPacket_t);
     return KeyClient_GetUdp(srvAddr, CMD_PKT_TYPE_DISCOVER, (unsigned char*)srvAddr, &msgLen, heap);
 }

@@ -2,6 +2,16 @@
 
 #ifndef NETX
     #include <pthread.h>
+
+    static void KeyBcastReqPktCallback(CmdReqPacket_t* reqPkt)
+    {
+        if (reqPkt && reqPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+            /* trigger key change */
+            unsigned char* addr = reqPkt->msg.keyResp.ipAddr;
+            printf("Key Change Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+        }
+    }
+
     static void* KeyBcastThread(void* arg)
     {
         int ret;

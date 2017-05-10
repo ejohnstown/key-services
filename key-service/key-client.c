@@ -1,21 +1,5 @@
 #include "key-services.h"
 
-#ifndef NETX
-    #include <pthread.h>
-    static void* KeyBcastThread(void* arg)
-    {
-        int ret;
-        void* heap = arg;
-        const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
-        struct in_addr srvAddr;
-        XMEMCPY(&srvAddr.s_addr, bcast_addr, sizeof(srvAddr.s_addr));
-
-        ret = KeyBcast_RunUdp(&srvAddr, heap);
-
-        return (void*)((size_t)ret);
-    }
-#endif /* !NETX */
-
 int main(int argc, char **argv)
 {
     int ret;
@@ -25,9 +9,6 @@ int main(int argc, char **argv)
     struct in_addr srvAddr;
     unsigned char* addr;
     const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
-#ifndef NETX
-    pthread_t tid;
-#endif
 
     XMEMSET(&srvAddr, 0, sizeof(srvAddr));
 
@@ -79,19 +60,6 @@ int main(int argc, char **argv)
 
     ret = KeyClient_GetKey(&srvAddr, &keyResp, heap);
     printf("KeyClient_GetKey: ret %d\n", ret);
-
-#ifndef NETX
-    /* spin up another thread for UDP broadcast */
-    ret = pthread_create(&tid, NULL, KeyBcastThread, heap);
-    if (ret < 0) {
-        printf("Pthread create failed for UDP\n");
-        goto exit;
-    }
-#endif
-
-#ifndef NETX
-    pthread_join(tid, NULL);
-#endif
 
 exit:
 

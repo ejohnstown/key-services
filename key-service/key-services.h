@@ -10,7 +10,6 @@
 #define LISTENQ        100*100   /* maximum backlog queue items */
 #define EPOCH_SIZE     2
 #define SUITE_SIZE     2
-#define SIZE_SIZE      2
 #define CIPHER_SUITE_0 0
 #define CIPHER_SUITE_1 0xFE
 #define MAX_ID_LEN     32 /* wolf supports up to 128 bytes */
@@ -62,17 +61,16 @@ typedef struct KeyRespPacket {
     unsigned char suite[SUITE_SIZE];
 } WOLFSSL_PACK KeyRespPacket_t;
 
-/* Discovery response packet */
-typedef struct DiscRespPacket {
+/* Key Change and Discovery response packet */
+typedef struct AddrRespPacket {
     unsigned char ipaddr[4];
-} WOLFSSL_PACK DiscRespPacket_t;
-
+} WOLFSSL_PACK AddrRespPacket_t;
 
 /* Command Header */
 typedef struct CmdPacketHeader {
     unsigned char version; /* Version = 1 - Allows future protocol changes */
-    unsigned char type;    /* Type: 1=Discovery, 2=KeyReq, ...Future Commands */
-    unsigned char size[SIZE_SIZE];    /* Message Size (remaining packet bytes to follow) */
+    unsigned char type;    /* Type: 0=Discovery, 1=KeyChg, 2=KeyReq, ...Future Commands */
+    unsigned char size[2]; /* Message Size (remaining packet bytes to follow) */
 } WOLFSSL_PACK CmdPacketHeader_t;
 
 /* Command Request Packet */
@@ -82,8 +80,13 @@ typedef struct CmdReqPacket {
 
 typedef union CmdRespMsg {
     unsigned char    raw[0];
+
+    /* public responses */
+    AddrRespPacket_t keyChgResp;
+    AddrRespPacket_t discResp;
+
+    /* private responses */
     KeyRespPacket_t  keyResp;
-    DiscRespPacket_t discResp;
 } WOLFSSL_PACK CmdRespMsg_t;
 
 /* Command Response Packet */
@@ -130,6 +133,7 @@ int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, vo
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
 
 /* Un-secure UDP broadcast listening service */
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, void* heap);
+typedef void (*KeyBcastReqPktCb)(CmdReqPacket_t* reqPkt);
+int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap);
 
 #endif /* _KEY_SERVICE_H_ */
