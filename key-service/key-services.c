@@ -409,32 +409,37 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
                 continue;
             }
 
-            /* if we are key server then process incomming requests */
-            if (gKeyServerRunning) {
-                unsigned char* resp = NULL;
+            if (ret > 0) {
+                int tries = 1000;
+                do {
+                    /* get remainder of packet and issue callback */
+                    ret = KeySocket_RecvFrom(listenfd, (char*)&respPkt.msg, ret,
+                        0, (struct sockaddr*)&clientAddr, &clientAddrLen);
+                    if (ret == WOLFSSL_CBIO_ERR_WANT_READ)
+                        KEY_SERVICE_SLEEP(KEY_SERVICE_RECV_TIMEOUT);
+                } while (--tries > 0 && ret == WOLFSSL_CBIO_ERR_WANT_READ);
 
-                /* get response */
-                KeyReq_GetResp(reqPkt->header.type, &resp, &n);
-
-                /* write response */
-                ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
-                    (struct sockaddr*)&clientAddr, clientAddrLen);
-                if (ret != n) {
-                #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
-                #endif
+                /* perform callback with packet */
+                if (reqCb) {
+                    reqCb(&respPkt);
                 }
             }
             else {
-                /* get remainder of packet and issue callback */
-                ret = KeySocket_RecvFrom(listenfd, (char*)&respPkt.msg, ret,
-                    0, (struct sockaddr*)&clientAddr, &clientAddrLen);
-                if (ret > 0) {
-                }
+                /* if we are key server then process incomming requests */
+                if (gKeyServerRunning) {
+                    unsigned char* resp = NULL;
 
-                /* perform callback with request packet */
-                if (reqCb) {
-                    reqCb(&respPkt);
+                    /* get response */
+                    KeyReq_GetResp(reqPkt->header.type, &resp, &n);
+
+                    /* write response */
+                    ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
+                        (struct sockaddr*)&clientAddr, clientAddrLen);
+                    if (ret != n) {
+                    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                        printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
+                    #endif
+                    }
                 }
             }
         }
