@@ -3,11 +3,11 @@
 #ifndef NETX
     #include <pthread.h>
 
-    static void KeyBcastReqPktCallback(CmdReqPacket_t* reqPkt)
+    static void KeyBcastReqPktCallback(CmdRespPacket_t* respPkt)
     {
-        if (reqPkt && reqPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+        if (respPkt && respPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
             /* trigger key change */
-            unsigned char* addr = reqPkt->msg.keyResp.ipAddr;
+            unsigned char* addr = respPkt->msg.keyChgResp.ipaddr;
             printf("Key Change Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
         }
     }
@@ -20,7 +20,7 @@
         struct in_addr srvAddr;
         XMEMCPY(&srvAddr.s_addr, bcast_addr, sizeof(srvAddr.s_addr));
 
-        ret = KeyBcast_RunUdp(&srvAddr, heap);
+        ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
 
         return (void*)((size_t)ret);
     }

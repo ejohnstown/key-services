@@ -219,18 +219,18 @@ static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
 static int KeyReq_Check(CmdReqPacket_t* reqPkt, int privacy)
 {
     int ret = 0;
+    unsigned short size = 0;
 
     if (reqPkt == NULL) {
         return BAD_FUNC_ARG;
     }
 
+    /* get size */
+    ato16(reqPkt->header.size, &size);
+
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
-    {
-        unsigned short size;
-        ato16(reqPkt->header.size, &size);
-        printf("Request: Version %d, Cmd %d, Size %d\n",
-            reqPkt->header.version, reqPkt->header.type, size);
-    }
+    printf("Request: Version %d, Cmd %d, Size %d\n",
+        reqPkt->header.version, reqPkt->header.type, size);
 #endif
 
     /* verify command version */
@@ -258,6 +258,8 @@ static int KeyReq_Check(CmdReqPacket_t* reqPkt, int privacy)
         return -1;
     }
 
+    /* return packet message (payload) size */
+    ret = size;
 
     return ret;
 }
@@ -356,9 +358,8 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
 #endif
     const unsigned long inAddrAny = INADDR_ANY;
     int n;
-    CmdReqPacket_t reqPkt;
-    unsigned char* req = (unsigned char*)&reqPkt;
-    unsigned char* resp;
+    CmdRespPacket_t respPkt;
+    CmdReqPacket_t* reqPkt = (CmdReqPacket_t*)&respPkt.header;
     struct sockaddr_in clientAddr;
     socklen_t clientAddrLen;
 
@@ -389,8 +390,10 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
         /* wait for client */
         clientAddrLen = sizeof(clientAddr);
 
-        XMEMSET(req, 0, sizeof(CmdReqPacket_t));
-        ret = KeySocket_RecvFrom(listenfd, (char*)req, sizeof(CmdReqPacket_t),
+        XMEMSET(reqPkt, 0, sizeof(CmdReqPacket_t));
+
+        /* get header */
+        ret = KeySocket_RecvFrom(listenfd, (char*)reqPkt, sizeof(CmdReqPacket_t),
             0, (struct sockaddr*)&clientAddr, &clientAddrLen);
         if (ret > 0) {
         #if KEY_SERVICE_LOGGING_LEVEL >= 2
@@ -398,8 +401,8 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
             printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
         #endif
             /* check request */
-            ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
-            if (ret != 0) {
+            ret = KeyReq_Check(reqPkt, CMD_PKT_PUBLIC);
+            if (ret < 0) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
                 printf("KeyBcast_RunUdp Error: KeyReq_Check failed %d\n", ret);
             #endif
@@ -408,8 +411,10 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
 
             /* if we are key server then process incomming requests */
             if (gKeyServerRunning) {
+                unsigned char* resp = NULL;
+
                 /* get response */
-                KeyReq_GetResp(reqPkt.header.type, &resp, &n);
+                KeyReq_GetResp(reqPkt->header.type, &resp, &n);
 
                 /* write response */
                 ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
@@ -420,10 +425,17 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
                 #endif
                 }
             }
+            else {
+                /* get remainder of packet and issue callback */
+                ret = KeySocket_RecvFrom(listenfd, (char*)&respPkt.msg, ret,
+                    0, (struct sockaddr*)&clientAddr, &clientAddrLen);
+                if (ret > 0) {
+                }
 
-            /* perform callback with request packet */
-            if (reqCb) {
-                reqCb(&reqPkt);
+                /* perform callback with request packet */
+                if (reqCb) {
+                    reqCb(&respPkt);
+                }
             }
         }
         else if (ret == WOLFSSL_CBIO_ERR_WANT_READ) {
@@ -544,7 +556,7 @@ int KeyServer_Run(void* heap)
             if (n > 0) {
                 /* check request */
                 ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
-                if (ret != 0) {
+                if (ret < 0) {
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
                     printf("KeyServer_Run: KeyReq_Check error %d\n", ret);
                 #endif
@@ -971,7 +983,7 @@ static int KeyClient_GetLocal(int reqType, unsigned char* msg, int* msgLen,
 
     /* check request */
     ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
-    if (ret != 0) {
+    if (ret < 0) {
         return ret;
     }
 

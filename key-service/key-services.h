@@ -133,7 +133,7 @@ int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, vo
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
 
 /* Un-secure UDP broadcast listening service */
-typedef void (*KeyBcastReqPktCb)(CmdReqPacket_t* reqPkt);
+typedef void (*KeyBcastReqPktCb)(CmdRespPacket_t* respPkt);
 int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap);
 
 #endif /* _KEY_SERVICE_H_ */
