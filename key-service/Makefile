@@ -1,39 +1,38 @@
 LIB_PATH=/usr/local
-CFLAGS=-Wall -I$(LIB_PATH)/include -I../wolfcast -DKEY_SERV_LOCAL_ADDR="192,168,0,112" -DKEY_BCAST_ADDR="192,168,0,255"
-DEBUG_CFLAGS=
-NETX_CFLAGS=
+CFLAGS=-Wall -I$(LIB_PATH)/include -DKEY_SERV_LOCAL_ADDR="192,168,0,110" -DKEY_BCAST_ADDR="192,168,0,255"
+LDFLAGS=
 
 # Dynamic wolfSSL library
-LIBS=-lwolfssl -lm -L$(LIB_PATH)/lib
+LDFLAGS+=-lwolfssl -lm -L$(LIB_PATH)/lib
 
 # Static wolfSSL library with Debug
-# Build wolfSSL with Debug
-#./configure --enable-debug --disable-shared
-DEBUG_CFLAGS+=-g3 -DDEBUG
-#LIBS=$(LIB_PATH)/lib/libwolfssl.a
+#CFLAGS+=-g3 -DDEBUG
+#LDFLAGS+=$(LIB_PATH)/lib/libwolfssl.a
 
+# Building wolfSSL
+#./configure --enable-psk --enable-mcast --enable-nullcipher CFLAGS="-DWOLFSSL_STATIC_PSK"
+# Build wolfSSL with Debug add --enable-debug --disable-shared
 
 # Enable NetX Networking
 NETX_PATH=./NetX/ver5.5_sp1
 THREADX_PATH=./ThreadX/ver5.6
-#NETX_CFLAGS+=-DHAVE_NETX -I$(NETX_PATH) -I$(THREADX_PATH) -I$(THREADX_PATH)/Cortex_M3_M4/GCC
+#CFLAGS+=-DHAVE_NETX -I$(NETX_PATH) -I$(THREADX_PATH) -I$(THREADX_PATH)/Cortex_M3_M4/GCC
 
 # Building wolfSSL
-#./configure --enable-psk --enable-aesgcm CFLAGS="-DWOLFSSL_STATIC_PSK -DWOLFSSL_USER_IO" --enable-dtls --enable-mcast --enable-nullcipher
+#./configure --enable-psk --enable-mcast --enable-nullcipher CFLAGS="-DWOLFSSL_STATIC_PSK"
+# Build wolfSSL with Debug add --enable-debug --disable-shared
 
-
-CFLAGS+=$(NETX_CFLAGS) $(DEBUG_CFLAGS)
 
 all: mcastpeer key-client key-server
 
 mcastpeer: mcastpeer.o key-services.o key-socket.o
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 key-client: key-client.o key-services.o key-socket.o
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 key-server: key-server.o key-services.o key-socket.o
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 .PHONY: clean all
 
