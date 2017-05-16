@@ -349,7 +349,7 @@ static void* KeyServerThread(void* arg)
     return NULL;
 }
 
-static void KeyBcastReqPktCallback(CmdRespPacket_t* respPkt)
+static void KeyBcastReqPktCallback(CmdPacket_t* respPkt)
 {
     if (respPkt && respPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
         /* trigger key change */
@@ -479,7 +479,7 @@ int main(int argc, char** argv)
 #endif
 
 #if defined(DEBUG_WOLFSSL)
-    //wolfSSL_Debugging_ON();
+    wolfSSL_Debugging_ON();
 #endif
 
     ret = wolfSSL_Init();

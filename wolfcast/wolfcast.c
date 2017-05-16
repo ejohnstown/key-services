@@ -70,7 +70,7 @@
     #define GROUP_PORT 12345
 
     #ifndef LOCAL_ADDR
-        #define LOCAL_ADDR "192.168.0.111"
+        #error Please define LOCAL_ADDR with IP in dot notation
     #endif
 
 

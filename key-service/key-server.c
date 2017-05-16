@@ -3,7 +3,7 @@
 #ifndef NETX
     #include <pthread.h>
 
-    static void KeyBcastReqPktCallback(CmdRespPacket_t* respPkt)
+    static void KeyBcastReqPktCallback(CmdPacket_t* respPkt)
     {
         if (respPkt && respPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
             /* trigger key change */

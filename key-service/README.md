@@ -20,12 +20,12 @@ typedef struct CmdPacketHeader {
     uint8_t  version; /* Version = 1 - Allows future protocol changes */
     uint8_t  type;    /* Type: 1=KeyReq, 2=Future Commands */
     uint16_t size;    /* Message Size (remaining packet bytes to follow) */
-} WOLFSSL_PACK CmdPacketHeader_t;
+} WOLFSSL_PACK CmdHeader_t;
 
 /* Command Request Packet */
 typedef struct CmdReqPacket {
     struct CmdPacketHeader header;
-} WOLFSSL_PACK CmdReqPacket_t;
+} WOLFSSL_PACK CmdPacket_t;
 
 /* Command Response Packet */
 typedef struct CmdRespPacket {
@@ -34,7 +34,7 @@ typedef struct CmdRespPacket {
         uint8_t msg[MAX_PACKET_MSG];
         KeyRespPacket_t keyResp;
     }
-} WOLFSSL_PACK CmdRespPacket_t;
+} WOLFSSL_PACK CmdPacket_t;
 
 typedef struct KeyRespPacket {
     uint8_t pms[PMS_SIZE];

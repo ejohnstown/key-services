@@ -6,7 +6,7 @@
 
 #define PMS_SIZE       64 /* SHA256 Block size */
 #define RAND_SIZE      32
-#define MAX_PACKET_MSG (sizeof(CmdRespMsg_t))
+#define MAX_PACKET_MSG (sizeof(CmdMsg_t))
 #define LISTENQ        100*100   /* maximum backlog queue items */
 #define EPOCH_SIZE     2
 #define SUITE_SIZE     2
@@ -16,7 +16,7 @@
 
 /* Subnet to broadcast key discovery message */
 #ifndef KEY_BCAST_ADDR
-    #define KEY_BCAST_ADDR      192,168,0,255
+    #error Please define KEY_BCAST_ADDR with comma notation
 #endif
 #ifndef KEY_BCAST_PORT
     #define KEY_BCAST_PORT      22222
@@ -24,7 +24,7 @@
 
 /* IP address to return for key server discovery */
 #ifndef KEY_SERV_LOCAL_ADDR
-    #define KEY_SERV_LOCAL_ADDR 192,168,0,111
+    #error Please define KEY_SERV_LOCAL_ADDR with comma notation
 #endif
 #ifndef KEY_SERV_PORT
     #define KEY_SERV_PORT       11111
@@ -67,18 +67,13 @@ typedef struct AddrRespPacket {
 } WOLFSSL_PACK AddrRespPacket_t;
 
 /* Command Header */
-typedef struct CmdPacketHeader {
+typedef struct CmdHeader {
     unsigned char version; /* Version = 1 - Allows future protocol changes */
     unsigned char type;    /* Type: 0=Discovery, 1=KeyChg, 2=KeyReq, ...Future Commands */
     unsigned char size[2]; /* Message Size (remaining packet bytes to follow) */
-} WOLFSSL_PACK CmdPacketHeader_t;
+} WOLFSSL_PACK CmdHeader_t;
 
-/* Command Request Packet */
-typedef struct CmdReqPacket {
-    struct CmdPacketHeader header;
-} WOLFSSL_PACK CmdReqPacket_t;
-
-typedef union CmdRespMsg {
+typedef union CmdMsg {
     unsigned char    raw[0];
 
     /* public responses */
@@ -87,13 +82,13 @@ typedef union CmdRespMsg {
 
     /* private responses */
     KeyRespPacket_t  keyResp;
-} WOLFSSL_PACK CmdRespMsg_t;
+} WOLFSSL_PACK CmdMsg_t;
 
-/* Command Response Packet */
-typedef struct CmdRespPacket {
-    CmdPacketHeader_t header;
-    CmdRespMsg_t      msg;
-} WOLFSSL_PACK CmdRespPacket_t;
+/* Command Packet */
+typedef struct CmdPacket {
+    CmdHeader_t header;
+    CmdMsg_t    msg;
+} WOLFSSL_PACK CmdPacket_t;
 
 
 /* PSK Client Identity */
@@ -133,7 +128,7 @@ int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, vo
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
 
 /* Un-secure UDP broadcast listening service */
-typedef void (*KeyBcastReqPktCb)(CmdRespPacket_t* respPkt);
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap);
+typedef void (*KeyBcastReqPktCb)(CmdPacket_t* pkt);
+int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb respCb, void* heap);
 
 #endif /* _KEY_SERVICE_H_ */
