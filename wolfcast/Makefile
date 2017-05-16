@@ -1,6 +1,9 @@
 LIB_PATH=/usr/local
-CFLAGS=-Wall -I$(LIB_PATH)/include -I. -I../key-service -DKEY_SERV_LOCAL_ADDR="192,168,0,110" -DKEY_BCAST_ADDR="192,168,0,255"
+CFLAGS=-Wall -I$(LIB_PATH)/include -I. -I../key-service
 LDFLAGS=
+
+# IP Addresses
+CFLAGS+=-DLOCAL_ADDR=\"192.168.0.110\" -DKEY_SERV_LOCAL_ADDR="192,168,0,110" -DKEY_BCAST_ADDR="192,168,0,255"
 
 # Dynamic wolfSSL library
 LDFLAGS+=-lwolfssl -lm -L$(LIB_PATH)/lib
