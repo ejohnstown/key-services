@@ -31,6 +31,15 @@
 #endif
 
 
+#ifdef HAVE_NETX
+    #define KEY_SERVICE_SLEEP(x) tx_thread_sleep(x)
+    #define KEY_SERVICE_TICKS_PER_SECOND 100
+#else
+    #define KEY_SERVICE_SLEEP(x) usleep(x)
+    #define KEY_SERVICE_TICKS_PER_SECOND 1000000
+#endif
+
+
 #ifndef WOLFSSL_PACK
 #if defined(__GNUC__)
     #define WOLFSSL_PACK __attribute__ ((packed))

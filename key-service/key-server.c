@@ -1,38 +1,9 @@
 #include "key-services.h"
 
-#ifndef NETX
-    #include <pthread.h>
-
-    static void KeyBcastReqPktCallback(CmdPacket_t* respPkt)
-    {
-        if (respPkt && respPkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
-            /* trigger key change */
-            unsigned char* addr = respPkt->msg.keyChgResp.ipaddr;
-            printf("Key Change Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
-        }
-    }
-
-    static void* KeyBcastThread(void* arg)
-    {
-        int ret;
-        void* heap = arg;
-        const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
-        struct in_addr srvAddr;
-        XMEMCPY(&srvAddr.s_addr, bcast_addr, sizeof(srvAddr.s_addr));
-
-        ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
-
-        return (void*)((size_t)ret);
-    }
-#endif /* !NETX */
-
 int main(int argc, char **argv)
 {
     int ret = 0;
     void* heap = NULL;
-#ifndef NETX
-    pthread_t tid;
-#endif
 
     (void)argc;
     (void)argv;
@@ -54,25 +25,12 @@ int main(int argc, char **argv)
         return ret;
     }
 
-#ifndef NETX
-    /* spin up another thread for UDP broadcast */
-    ret = pthread_create(&tid, NULL, KeyBcastThread, heap);
-    if (ret < 0) {
-        printf("Pthread create failed for UDP\n");
-        goto exit;
-    }
-#endif
-
     ret = KeyServer_Run(heap);
 
-#ifndef NETX
-    pthread_join(tid, NULL);
-
 exit:
-#endif
 
-    wolfSSL_Cleanup();
     KeyServer_Free(heap);
+    wolfSSL_Cleanup();
 
     return ret;
 }
