@@ -61,6 +61,8 @@ static const int gRespPrivacy[CMD_PKT_TYPE_COUNT] = {
     CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_DISCOVER */
     CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_KEY_CHG */
     CMD_PKT_PRIVATE,/* CMD_PKT_TYPE_KEY_REQ */
+    CMD_PKT_PRIVATE,/* CMD_PKT_TYPE_KEY_NEW */
+    CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_KEY_USE */
 };
 
 static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
@@ -190,6 +192,14 @@ static int KeyReq_BuildKeyReq(void* heap)
     return KeyReq_BuildKeyReq_Ex(NULL, 0, NULL, 0, NULL, 0, heap);
 }
 
+static int KeyReq_BuildKeyUse(void* heap)
+{
+    unsigned char epoch[EPOCH_SIZE];
+
+    c16toa(gKeyServerEpoch, epoch);
+    return BuildPacket(NULL, CMD_PKT_TYPE_KEY_USE, sizeof(epoch), epoch, heap);
+}
+
 static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
 {
     /* set defaults */
@@ -268,6 +278,9 @@ int KeyServer_Init(void* heap)
 
         /* init each command type */
         ret = KeyReq_BuildKeyReq(heap);
+        if (ret != 0)
+            return ret;
+        ret = KeyReq_BuildKeyUse(heap);
         if (ret != 0)
             return ret;
 
@@ -646,6 +659,28 @@ int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,
 int KeyServer_GenNewKey(void* heap)
 {
     return KeyReq_BuildKeyReq(heap);
+}
+
+int KeyServer_NewKeyUse(void* heap)
+{
+    int ret;
+
+    ret = KeyReq_BuildKeyUse(heap);
+
+    if (ret == 0) {
+        ret = KeyClient_NetUdpBcast(&gBcastAddr,
+            gRespPktLen[CMD_PKT_TYPE_KEY_USE],
+            (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_USE], 0, NULL);
+    }
+
+    return ret;
+}
+
+int KeyServer_NewKeyChange(void* heap)
+{
+    return KeyClient_NetUdpBcast(&gBcastAddr,
+        gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
+        (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
 }
 
 int KeyServer_IsRunning(void)
@@ -1074,3 +1109,39 @@ int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap)
     int msgLen = sizeof(AddrRespPacket_t);
     return KeyClient_GetUdp(srvAddr, CMD_PKT_TYPE_DISCOVER, (unsigned char*)srvAddr, &msgLen, heap);
 }
+
+int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* epochResp, void* heap)
+{
+    int msgLen = sizeof(EpochRespPacket_t);
+    return KeyClient_GetNet(srvAddr, CMD_PKT_TYPE_KEY_NEW, (unsigned char*)epochResp, &msgLen, heap);
+}
+
+void KeyBcast_DefaultCb(CmdPacket_t* pkt)
+{
+    if (pkt) {
+        switch (pkt->header.type) {
+            case CMD_PKT_TYPE_KEY_CHG:
+                #if KEY_SERVICE_LOGGING_LEVEL >= 2
+                    printf("Bcast Callback: New Key Available\n");
+                #endif
+                break;
+            case CMD_PKT_TYPE_KEY_USE:
+                #if KEY_SERVICE_LOGGING_LEVEL >= 2
+                    printf("Bcast Callback: Use New Key\n");
+                #endif
+                break;
+            case CMD_PKT_TYPE_DISCOVER:
+                #if KEY_SERVICE_LOGGING_LEVEL >= 2
+                    printf("Bcast Callback: Discover\n");
+                #endif
+                break;
+            default:
+                #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    printf("Bcast Callback: Unsupported packet type %u\n",
+                        pkt->header.type);
+                #endif
+                break;
+        }
+    }
+}
+

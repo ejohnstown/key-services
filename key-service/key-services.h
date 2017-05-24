@@ -56,7 +56,9 @@ enum CmdPacketCommandType {
     CMD_PKT_TYPE_INVALID = -1,
     CMD_PKT_TYPE_DISCOVER = 0, /* find key servers */
     CMD_PKT_TYPE_KEY_CHG =  1, /* key server key has changed */
-    CMD_PKT_TYPE_KEY_REQ =  2, /* get key from server */
+    CMD_PKT_TYPE_KEY_USE =  2, /* peers should use new key */
+    CMD_PKT_TYPE_KEY_REQ =  3, /* get key from server */
+    CMD_PKT_TYPE_KEY_NEW =  4, /* request server generate new key */
 
     CMD_PKT_TYPE_COUNT,
 };
@@ -75,6 +77,11 @@ typedef struct AddrRespPacket {
     unsigned char ipaddr[4];
 } WOLFSSL_PACK AddrRespPacket_t;
 
+/* Use New Key response packet */
+typedef struct EpochRespPacket {
+    unsigned char epoch[EPOCH_SIZE];
+} WOLFSSL_PACK EpochRespPacket_t;
+
 /* Command Header */
 typedef struct CmdHeader {
     unsigned char version; /* Version = 1 - Allows future protocol changes */
@@ -83,14 +90,15 @@ typedef struct CmdHeader {
 } WOLFSSL_PACK CmdHeader_t;
 
 typedef union CmdMsg {
-    unsigned char    raw[0];
+    unsigned char     raw[0];
 
     /* public responses */
-    AddrRespPacket_t keyChgResp;
-    AddrRespPacket_t discResp;
+    AddrRespPacket_t  keyChgResp;
+    AddrRespPacket_t  discResp;
+    EpochRespPacket_t epochResp;
 
     /* private responses */
-    KeyRespPacket_t  keyResp;
+    KeyRespPacket_t   keyResp;
 } WOLFSSL_PACK CmdMsg_t;
 
 /* Command Packet */
@@ -128,6 +136,8 @@ int KeyServer_GenNewKey(void* heap);
 int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,
     unsigned char* serverRandom, int serverRandomSz,
     unsigned char* clientRandom, int clientRandomSz, void* heap);
+int KeyServer_NewKeyUse(void* heap);
+int KeyServer_NewKeyChange(void* heap);
 void KeyServer_Free(void* heap);
 
 int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
@@ -135,9 +145,12 @@ int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* 
 
 int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, void* heap);
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
+int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* epochResp, void* heap);
 
 /* Un-secure UDP broadcast listening service */
 typedef void (*KeyBcastReqPktCb)(CmdPacket_t* pkt);
 int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb respCb, void* heap);
+
+void KeyBcast_DefaultCb(CmdPacket_t* pkt);
 
 #endif /* _KEY_SERVICE_H_ */
