@@ -11,8 +11,6 @@
 
 //#define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
-//#define TEST_KEY_ROLL 10
-
 #ifdef HAVE_NETX
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         #define printf bsp_debug_printf
@@ -493,9 +491,6 @@ int KeyServer_Run(void* heap)
     unsigned char* req = (unsigned char*)&reqPkt;
     unsigned char* resp;
     int n;
-#ifdef TEST_KEY_ROLL
-    int keyFlag = 0;
-#endif
 
 #ifdef HAVE_NETX
     /* Extra lifting for NETX sockets */
@@ -601,24 +596,6 @@ int KeyServer_Run(void* heap)
             ssl = NULL;
             KeySocket_Close(&connfd);
         }
-
-    #ifdef TEST_KEY_ROLL
-        /* XXX Hack to force updates. Check against 2 if adding the linux peer */
-        if (keyFlag == TEST_KEY_ROLL) {
-            gKeyServerInitDone = 0;
-        #if KEY_SERVICE_LOGGING_LEVEL >= 3
-            printf("Rolling key\n");
-        #endif
-            KeyServer_GenNewKey(heap);
-            keyFlag = 0;
-        }
-        else {
-        #if KEY_SERVICE_LOGGING_LEVEL >= 3
-            printf("Roll inc %d\n", keyFlag);
-        #endif
-            keyFlag++;
-        }
-    #endif
 
         ret = KeySocket_Relisten(connfd, listenfd, KEY_SERV_PORT);
         if (ret != 0)
@@ -1144,4 +1121,3 @@ void KeyBcast_DefaultCb(CmdPacket_t* pkt)
         }
     }
 }
-
