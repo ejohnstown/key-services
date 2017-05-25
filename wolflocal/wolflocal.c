@@ -57,7 +57,6 @@ unsigned int LowResTimer(void)
 #define KS_TIMEOUT_1SEC 100
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_CLIENT KS_TIMEOUT_1SEC
-#define KS_TIMEOUT_KEY_SERVER KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_WOLFCAST_KEY_POLL KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_STATE_WRITE TX_WAIT_FOREVER
@@ -79,12 +78,12 @@ unsigned int LowResTimer(void)
  * and typically named "status". */
 
 static TX_THREAD gKeyServerThread;
-static TX_THREAD gKeyServerUdpThread;
+static TX_THREAD gKeyBcastUdpThread;
 static TX_THREAD gKeyClientThread;
 static TX_THREAD gWolfCastClientThread;
 
 static char gKeyServerStack[KS_STACK_SZ];
-static char gKeyServerUdpStack[KS_STACK_SZ];
+static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[KS_STACK_SZ];
 static unsigned char gKeyServerMemory[KS_MEMORY_POOL_SZ];
@@ -100,8 +99,10 @@ static TX_MUTEX gKeyStateMutex;
 static UINT gKeySet = 0;
 UINT gGetNewKey = 1;
 static UINT gFindMaster = 1;
+static UINT gSwitchKeys = 0;
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
+static struct in_addr gKeySrvAddr = { 0 };
 
 extern NX_IP* nxIp;
 
@@ -177,14 +178,36 @@ KeyServerEntry(ULONG ignore)
 }
 
 
-/* KeyServerUdpEntry
- * Thread entry point to drive the key server's UDP beacon. Key server
- * really shouldn't ever return, but the return code is checked and
- * reported, just in case. First it waits for the network interface to
- * become ready, then it calls the self-contained KeyServer's UDP
- * server, which handles the beacon. */
 static void
-KeyServerUdpEntry(ULONG ignore)
+broadcastCb(CmdPacket_t* pkt)
+{
+    if (pkt) {
+        switch (pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+            case CMD_PKT_TYPE_KEY_CHG:
+                {
+                    /* trigger key change */
+                    unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
+                    XMEMCPY(&gKeySrvAddr.s_addr, addr,
+                            sizeof(gKeySrvAddr.s_addr));
+                    gGetNewKey = 1;
+                }
+                break;
+            case CMD_PKT_TYPE_KEY_USE:
+                gSwitchKeys = 1;
+                break;
+        }
+    }
+}
+
+
+/* KeyBcastUdpEntry
+ * Thread entry point to drive the UDP beacon. This really shouldn't
+ * ever return, but the return code is checked and reported, just in
+ * case. First it waits for the network interface to become ready,
+ * then it calls the self-contained KeyBcast's UDP server, which
+ * handles the beacon. */
+static void
+KeyBcastUdpEntry(ULONG ignore)
 {
     int result;
 
@@ -192,14 +215,14 @@ KeyServerUdpEntry(ULONG ignore)
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 3
-        KS_PRINTF("Key Service udp server waiting for network.\n");
+        KS_PRINTF("Key Service bcast udp server waiting for network.\n");
 #endif
     }
 
-    result = KeyServer_RunUdp(NULL);
+    result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, NULL);
     if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
-        KS_PRINTF("KeyServerUdp terminated. (%d)\n", result);
+        KS_PRINTF("KeyBcastUdp terminated. (%d)\n", result);
 #endif
     }
 }
@@ -218,7 +241,6 @@ KeyClientEntry(ULONG ignore)
     int storeKey = 0;
     UINT status = TX_SUCCESS;
     KeyRespPacket_t keyResp;
-    struct in_addr keySrvAddr = { 0 };
 
     (void)ignore;
 
@@ -254,7 +276,7 @@ KeyClientEntry(ULONG ignore)
         }
 
         if (findMaster) {
-            result = KeyClient_FindMaster(&keySrvAddr, NULL);
+            result = KeyClient_FindMaster(&gKeySrvAddr, NULL);
             if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
@@ -269,7 +291,7 @@ KeyClientEntry(ULONG ignore)
 #if KEY_SERVICE_LOGGING_LEVEL >= 3
             KS_PRINTF("Key client getting key.\n");
 #endif
-            result = KeyClient_GetKey(&keySrvAddr, &keyResp, NULL);
+            result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, NULL);
             if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
                 KS_PRINTF("Unable to retrieve key\n");
@@ -325,11 +347,25 @@ sequenceCb(
 #endif
     }
     else {
+        int ret;
         if (curSeq >= maxSeq) {
-            gGetNewKey = 1;
+            EpochRespPacket_t newEpoch;
+            ret = KeyClient_NewKeyRequest(&gKeySrvAddr, &newEpoch, NULL);
+            if (ret != 0) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("wolfCast callback couldn't request new key\n");
+#endif
+            }
+            else {
+                gGetNewKey = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 2
+                KS_PRINTF("Key server offering epoch %u\n",
+                          (newEpoch.epoch[0] << 8 | newEpoch.epoch[1]));
+#endif
+            }
         }
         else {
-            int ret = KeyServer_GenNewKey(gHeapHint);
+            ret = KeyServer_GenNewKey(gHeapHint);
             if (ret != 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
                 KS_PRINTF("wolfCast callback couldn't generate new key\n");
@@ -459,8 +495,9 @@ WolfCastClientEntry(ULONG ignore)
 #endif
             }
 
-            if (!error && newSsl != NULL && keySet) {
+            if (!error && newSsl != NULL && keySet && gSwitchKeys) {
                 keySet = 0;
+                gSwitchKeys = 0;
                 result = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyState.pms, sizeof(keyState.pms),
                                 keyState.clientRandom, keyState.serverRandom,
@@ -524,14 +561,16 @@ WolfLocalInit(void)
         return;
     }
 
-    status = tx_thread_create(&gKeyServerUdpThread, "key service udp server",
-                              KeyServerUdpEntry, 0,
-                              gKeyServerUdpStack, sizeof(gKeyServerUdpStack),
+    status = tx_thread_create(&gKeyBcastUdpThread,
+                              "key service bcast udp server",
+                              KeyBcastUdpEntry, 0,
+                              gKeyBcastUdpStack, sizeof(gKeyBcastUdpStack),
                               KS_PRIORITY, KS_THRESHOLD,
                               TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("key server udp thread create failed = 0x%02X\n", status);
+        KS_PRINTF("key server bcast udp thread create failed = 0x%02X\n",
+                  status);
 #endif
         return;
     }

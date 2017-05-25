@@ -655,6 +655,8 @@ int KeyServer_NewKeyUse(void* heap)
 
 int KeyServer_NewKeyChange(void* heap)
 {
+    (void)heap;
+
     return KeyClient_NetUdpBcast(&gBcastAddr,
         gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
         (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
