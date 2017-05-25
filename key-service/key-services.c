@@ -58,9 +58,9 @@ enum {
 static const int gRespPrivacy[CMD_PKT_TYPE_COUNT] = {
     CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_DISCOVER */
     CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_KEY_CHG */
+    CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_KEY_USE */
     CMD_PKT_PRIVATE,/* CMD_PKT_TYPE_KEY_REQ */
     CMD_PKT_PRIVATE,/* CMD_PKT_TYPE_KEY_NEW */
-    CMD_PKT_PUBLIC, /* CMD_PKT_TYPE_KEY_USE */
 };
 
 static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
