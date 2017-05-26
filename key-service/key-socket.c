@@ -500,7 +500,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't get packet length");
+            printf("couldn't get packet length\n");
         #endif
         }
     }
@@ -509,7 +509,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         if (rxSz > (unsigned long)sz) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("receive packet too large for buffer");
+            printf("receive packet too large for buffer\n");
         #endif
         }
     }
@@ -519,7 +519,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't retrieve packet");
+            printf("couldn't retrieve packet\n");
         #endif
         }
     }
@@ -536,7 +536,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
             if (ret != NX_SUCCESS) {
                 error = 1;
             #if KEY_SOCKET_LOGGING_LEVEL >= 1
-                printf("couldn't get source address");
+                printf("couldn't get source address\n");
             #endif
             }
             else {
@@ -556,7 +556,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't release packet");
+            printf("couldn't release packet\n");
         #endif
         }
     }
@@ -569,7 +569,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
         else {
             recvd = WOLFSSL_CBIO_ERR_GENERAL;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("rx error");
+            printf("rx error\n");
         #endif
         }
     }
@@ -693,7 +693,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     if (ret != NX_SUCCESS) {
         error = 1;
     #if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("couldn't allocate packet wrapper");
+        printf("couldn't allocate packet wrapper\n");
     #endif
     }
 
@@ -702,7 +702,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't append data to packet");
+            printf("couldn't append data to packet\n");
         #endif
         }
     }
@@ -713,7 +713,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
         if (ret != NX_SUCCESS) {
             error = 1;
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("tx error");
+            printf("tx error\n");
         #endif
         }
     }
@@ -725,7 +725,7 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
         ret = nx_packet_release(nxPacket);
         if (ret != NX_SUCCESS) {
         #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't release packet");
+            printf("couldn't release packet\n");
         #endif
         }
     }
