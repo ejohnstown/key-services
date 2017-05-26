@@ -175,11 +175,6 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
             if (clientRandomSz > RAND_SIZE) clientRandomSz = RAND_SIZE;
             XMEMCPY(pkt->msg.keyResp.clientRandom, clientRandom, clientRandomSz);
         }
-
-        /* trigger bcast message for key change */
-        ret = KeyClient_NetUdpBcast(&gBcastAddr,
-            gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
-            (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
     }
 
     return ret;
@@ -635,7 +630,14 @@ int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,
  */
 int KeyServer_GenNewKey(void* heap)
 {
-    return KeyReq_BuildKeyReq(heap);
+    int ret;
+
+    ret = KeyReq_BuildKeyReq(heap);
+    if (ret == 0) {
+        ret = KeyServer_NewKeyChange(heap);
+    }
+
+    return ret;
 }
 
 int KeyServer_NewKeyUse(void* heap)
