@@ -211,7 +211,7 @@ static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
 
     /* return buffer to response */
     if (resp)
-        *resp = (unsigned char*)&gRespPkt[type];
+        *resp = (unsigned char*)gRespPkt[type];
 }
 
 static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
