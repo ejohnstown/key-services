@@ -957,6 +957,7 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     CmdPacket_t* pkt;
     unsigned short size;
     int n;
+    int rxLen;
 
     (void)heap;
 
@@ -965,10 +966,11 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     if (ret != 0)
         return ret;
 
+    rxLen = sizeof(CmdHeader_t) + *msgLen;
     /* send request and get msg */
     ret = KeyClient_NetUdpBcast(srvAddr,
         sizeof(CmdHeader_t), (unsigned char*)pkt,
-        msgLen, (unsigned char*)pkt);
+        &rxLen, (unsigned char*)pkt);
     if (ret < 0) {
         return ret;
     }
