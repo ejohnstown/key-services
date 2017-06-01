@@ -99,7 +99,7 @@ static TX_MUTEX gKeyStateMutex;
 static UINT gKeySet = 0;
 UINT gGetNewKey = 1;
 static UINT gFindMaster = 1;
-static UINT gSwitchKeys = 0;
+static UINT gSwitchKeys = 1;
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
