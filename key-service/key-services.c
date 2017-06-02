@@ -891,7 +891,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 #else
     (void)srvAddr;
     ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr,
-        KEY_BCAST_PORT, 1);
+        KS_ANY_PORT, 1);
     if (ret != 0) {
         goto exit;
     }

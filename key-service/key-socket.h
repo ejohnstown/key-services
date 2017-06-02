@@ -32,6 +32,7 @@
         #include "pgb002_ap2.h"
     #endif
 
+    #define KS_ANY_PORT        NX_ANY_PORT
     #define KS_SOCKET_T        NX_TCP_SOCKET*
     #define KS_SOCKET_T_INIT   NULL
 
@@ -71,6 +72,7 @@
     #include <unistd.h>
     #include <fcntl.h>
 
+    #define KS_ANY_PORT        0
     #define KS_SOCKET_T        int
     #define KS_SOCKET_T_INIT   -1
 
