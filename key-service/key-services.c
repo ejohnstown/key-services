@@ -920,7 +920,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     }
 
     /* if we are expecting a response */
-    if (rxMsg && *rxMsgLen > 0) {
+    if (rxMsg && rxMsgLen && *rxMsgLen > 0) {
         /* read response */
         n = KeySocket_RecvFrom(sockfd, (char*)rxMsg, *rxMsgLen, 0,
                                  (struct sockaddr*)&clientAddr, &clientAddrLen);
