@@ -61,6 +61,7 @@ unsigned int LowResTimer(void)
 #define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_STATE_WRITE TX_WAIT_FOREVER
 #define KS_TIMEOUT_KEY_STATE_READ TX_NO_WAIT
+#define KS_TIMEOUT_HEAP_INIT KS_TIMEOUT_1SEC
 
 #define SERVER_ID 5
 #define FOREIGN_CLIENT_ID 23
@@ -143,15 +144,11 @@ KeyServerEntry(ULONG ignore)
 #endif
     }
 
-    if (result == SSL_SUCCESS) {
-        result = wc_LoadStaticMemory(&gHeapHint,
-                                     gKeyServerMemory, sizeof(gKeyServerMemory),
-                                     WOLFMEM_GENERAL, 1);
-        if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
-            KS_PRINTF("KeyServer couldn't get memory pool. (%d)\n", result);
+    while (gHeapHint == NULL) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+        KS_PRINTF("KeyServer waiting for heap.\n");
 #endif
-        }
+        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
     if (result == 0) {
@@ -173,7 +170,6 @@ KeyServerEntry(ULONG ignore)
     }
 
     KeyServer_Free(gHeapHint);
-
     wolfSSL_Cleanup();
 }
 
@@ -219,7 +215,14 @@ KeyBcastUdpEntry(ULONG ignore)
 #endif
     }
 
-    result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, NULL);
+    while (gHeapHint == NULL) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+        KS_PRINTF("KeyBcast waiting for heap.\n");
+#endif
+        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
+    }
+
+    result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
     if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
         KS_PRINTF("KeyBcastUdp terminated. (%d)\n", result);
@@ -258,6 +261,15 @@ KeyClientEntry(ULONG ignore)
 #endif
     }
 
+    result = wc_LoadStaticMemory(&gHeapHint,
+                                 gKeyServerMemory, sizeof(gKeyServerMemory),
+                                 WOLFMEM_GENERAL, 1);
+    if (result != 0) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
+        KS_PRINTF("KeyClient couldn't get memory pool. (%d)\n", result);
+#endif
+    }
+
     while (1) {
         if (!findMaster && !getNewKey && !storeKey) {
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
@@ -276,7 +288,7 @@ KeyClientEntry(ULONG ignore)
         }
 
         if (findMaster) {
-            result = KeyClient_FindMaster(&gKeySrvAddr, NULL);
+            result = KeyClient_FindMaster(&gKeySrvAddr, gHeapHint);
             if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
@@ -291,7 +303,7 @@ KeyClientEntry(ULONG ignore)
 #if KEY_SERVICE_LOGGING_LEVEL >= 3
             KS_PRINTF("Key client getting key.\n");
 #endif
-            result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, NULL);
+            result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, gHeapHint);
             if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
                 KS_PRINTF("Unable to retrieve key\n");
@@ -405,7 +417,7 @@ sequenceCb(
 
             if (curSeq >= maxSeq) {
                 EpochRespPacket_t newEpoch;
-                ret = KeyClient_NewKeyRequest(&gKeySrvAddr, &newEpoch, NULL);
+                ret = KeyClient_NewKeyRequest(&gKeySrvAddr, &newEpoch, gHeapHint);
                 if (ret != 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
                     KS_PRINTF("wolfCast callback couldn't request new key\n");
@@ -467,6 +479,13 @@ WolfCastClientEntry(ULONG ignore)
 #if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("wolfCast thread waiting for network.\n");
 #endif
+    }
+
+    while (gHeapHint == NULL) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+        KS_PRINTF("WolfCast waiting for heap.\n");
+#endif
+        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
     error = WolfcastInit(1, CLIENT_ID, &ctx, &socketInfo);
@@ -615,7 +634,7 @@ WolfLocalInit(void)
 
     status = tx_thread_create(&gKeyBcastUdpThread,
                               "key service bcast udp server",
-                              KeyBcastUdpEntry, 0,
+                              KeyBcastUdpEntry, NULL,
                               gKeyBcastUdpStack, sizeof(gKeyBcastUdpStack),
                               KS_PRIORITY, KS_THRESHOLD,
                               TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -628,7 +647,7 @@ WolfLocalInit(void)
     }
 
     status = tx_thread_create(&gKeyServerThread, "key service server",
-                           KeyServerEntry, 0,
+                           KeyServerEntry, NULL,
                            gKeyServerStack, sizeof(gKeyServerStack),
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -640,7 +659,7 @@ WolfLocalInit(void)
     }
 
     status = tx_thread_create(&gKeyClientThread, "key service client",
-                           KeyClientEntry, 0,
+                           KeyClientEntry, NULL,
                            gKeyClientStack, sizeof(gKeyClientStack),
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -652,7 +671,7 @@ WolfLocalInit(void)
     }
 
     status = tx_thread_create(&gWolfCastClientThread, "wolfCast client",
-                           WolfCastClientEntry, 0,
+                           WolfCastClientEntry, NULL,
                            gWolfCastClientStack, sizeof(gWolfCastClientStack),
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
