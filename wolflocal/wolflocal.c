@@ -144,6 +144,12 @@ KeyServerEntry(ULONG ignore)
 #endif
     }
 
+    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+        KS_PRINTF("Key server waiting for network.\n");
+#endif
+    }
+
     while (gHeapHint == NULL) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
         KS_PRINTF("KeyServer waiting for heap.\n");
@@ -261,13 +267,11 @@ KeyClientEntry(ULONG ignore)
 #endif
     }
 
-    result = wc_LoadStaticMemory(&gHeapHint,
-                                 gKeyServerMemory, sizeof(gKeyServerMemory),
-                                 WOLFMEM_GENERAL, 1);
-    if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
-        KS_PRINTF("KeyClient couldn't get memory pool. (%d)\n", result);
+    while (gHeapHint == NULL) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+        KS_PRINTF("KeyClient waiting for heap.\n");
 #endif
+        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
     while (1) {
@@ -630,6 +634,15 @@ WolfLocalInit(void)
         KS_PRINTF("key state mutex create failed = 0x%02X\n", status);
 #endif
         return;
+    }
+
+    status = wc_LoadStaticMemory(&gHeapHint,
+                                 gKeyServerMemory, sizeof(gKeyServerMemory),
+                                 WOLFMEM_GENERAL, 1);
+    if (status != 0) {
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
+        KS_PRINTF("WolfLocalInit couldn't get memory pool. (%d)\n", status);
+#endif
     }
 
     status = tx_thread_create(&gKeyBcastUdpThread,
