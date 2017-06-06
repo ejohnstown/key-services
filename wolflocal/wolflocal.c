@@ -71,6 +71,7 @@ unsigned int LowResTimer(void)
 #else /* PGB006 */
     #define CLIENT_ID 7
     #define OTHER_CLIENT_ID 6
+    #define WOLFLOCAL_TEST_KEY_REQUEST
 #endif
 
 
@@ -78,18 +79,19 @@ unsigned int LowResTimer(void)
  * named "result". Return codes for ThreadX/NetX are of type UINT
  * and typically named "status". */
 
-static TX_THREAD gKeyServerThread;
 static TX_THREAD gKeyBcastUdpThread;
 static TX_THREAD gKeyClientThread;
 static TX_THREAD gWolfCastClientThread;
 
-static char gKeyServerStack[KS_STACK_SZ];
 static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[KS_STACK_SZ];
-static unsigned char gKeyServerMemory[KS_MEMORY_POOL_SZ];
-/* The key server memory buffer is used for the RNG and the key service
- * messages. */
+static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
+
+#ifndef WOLFLOCAL_TEST_KEY_REQUEST
+    static TX_THREAD gKeyServerThread;
+    static char gKeyServerStack[KS_STACK_SZ];
+#endif
 
 /* Mutex for controlling the current key state. The Key
  * Client thread will be writing to the key state and
@@ -125,6 +127,8 @@ static int isNetworkReady(ULONG timeout)
     return isReady;
 }
 
+
+#ifndef WOLFLOCAL_TEST_KEY_REQUEST
 
 /* KeyServerEntry
  * Thread entry point to drive the key server. Key server really
@@ -175,6 +179,8 @@ KeyServerEntry(ULONG ignore)
     KeyServer_Free(gHeapHint);
     wolfSSL_Cleanup();
 }
+
+#endif
 
 
 static void
@@ -634,7 +640,7 @@ WolfLocalInit(void)
     }
 
     status = wc_LoadStaticMemory(&gHeapHint,
-                                 gKeyServerMemory, sizeof(gKeyServerMemory),
+                                 gKeyServiceMemory, sizeof(gKeyServiceMemory),
                                  WOLFMEM_GENERAL, 1);
     if (status != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
@@ -644,7 +650,7 @@ WolfLocalInit(void)
 
     status = tx_thread_create(&gKeyBcastUdpThread,
                               "key service bcast udp server",
-                              KeyBcastUdpEntry, NULL,
+                              KeyBcastUdpEntry, 0,
                               gKeyBcastUdpStack, sizeof(gKeyBcastUdpStack),
                               KS_PRIORITY, KS_THRESHOLD,
                               TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -656,8 +662,9 @@ WolfLocalInit(void)
         return;
     }
 
+#ifndef WOLFLOCAL_TEST_KEY_REQUEST
     status = tx_thread_create(&gKeyServerThread, "key service server",
-                           KeyServerEntry, NULL,
+                           KeyServerEntry, 0,
                            gKeyServerStack, sizeof(gKeyServerStack),
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -667,9 +674,10 @@ WolfLocalInit(void)
 #endif
         return;
     }
+#endif
 
     status = tx_thread_create(&gKeyClientThread, "key service client",
-                           KeyClientEntry, NULL,
+                           KeyClientEntry, 0,
                            gKeyClientStack, sizeof(gKeyClientStack),
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
@@ -681,7 +689,7 @@ WolfLocalInit(void)
     }
 
     status = tx_thread_create(&gWolfCastClientThread, "wolfCast client",
-                           WolfCastClientEntry, NULL,
+                           WolfCastClientEntry, 0,
                            gWolfCastClientStack, sizeof(gWolfCastClientStack),
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
