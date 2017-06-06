@@ -137,10 +137,9 @@ KeyServerEntry(ULONG ignore)
 
     (void)ignore;
 
-    result = wolfSSL_Init();
-    if (result != SSL_SUCCESS) {
+    if (wolfSSL_Init() != SSL_SUCCESS) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        KS_PRINTF("KeyServer couldn't initialize wolfSSL. (%d)\n", result);
+        KS_PRINTF("KeyServer couldn't initialize wolfSSL.\n");
 #endif
     }
 
@@ -157,13 +156,11 @@ KeyServerEntry(ULONG ignore)
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
-    if (result == 0) {
-        result = KeyServer_Init(gHeapHint);
-        if (result != 0) {
+    result = KeyServer_Init(gHeapHint);
+    if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
+        KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
 #endif
-        }
     }
 
     if (result == 0) {
