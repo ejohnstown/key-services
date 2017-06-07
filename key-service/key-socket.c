@@ -284,7 +284,10 @@ int KeySocket_Relisten(KS_SOCKET_T sockFd, KS_SOCKET_T listenFd,
     if (ret == NX_SUCCESS) {
         ret = nx_tcp_server_socket_relisten(nxIp, srvPort, listenFd);
         if (ret != NX_SUCCESS) {
-            ret = -1;
+            if (ret == NX_CONNECTION_PENDING)
+                ret = NX_SUCCESS;
+            else
+                ret = -1;
         }
     }
     else {
