@@ -550,7 +550,7 @@ int KeyServer_Run(void* heap)
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
                 printf("Error: wolfSSL_accept\n");
             #endif
-                goto exit;
+                goto cleanup;
             }
 
             XMEMSET(req, 0, sizeof(CmdPacket_t));
@@ -562,7 +562,7 @@ int KeyServer_Run(void* heap)
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
                     printf("KeyServer_Run: KeyReq_Check error %d\n", ret);
                 #endif
-                    goto exit;
+                    goto cleanup;
                 }
 
                 /* get response */
@@ -574,7 +574,7 @@ int KeyServer_Run(void* heap)
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
                     printf("KeyServer_Run: write error %d\n", ret);
                 #endif
-                    goto exit;
+                    goto cleanup;
                 }
             }
             if (n < 0) {
@@ -582,9 +582,9 @@ int KeyServer_Run(void* heap)
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
                 printf("KeyServer_Run: read error %d\n", ret);
             #endif
-                goto exit;
+                goto cleanup;
             }
-
+cleanup:
             /* closes the connections after responding */
             wolfSSL_shutdown(ssl);
             wolfSSL_free(ssl);
@@ -607,8 +607,9 @@ exit:
     }
 #endif
 
-    KeySocket_Unlisten(KEY_SERV_PORT);
     KeySocket_Close(&listenfd);
+    KeySocket_Unaccept(listenfd);
+    KeySocket_Unlisten(KEY_SERV_PORT);
     KeySocket_Delete(&listenfd);
 
     /* free up memory used by wolfSSL */
