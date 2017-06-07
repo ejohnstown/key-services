@@ -15,6 +15,10 @@
     #endif
     NX_IP *nxIp = NULL; /* XXX This needed to be global for a bit. */
     NX_PACKET_POOL *nxPool = NULL;
+
+    #ifndef KEY_SOCKET_RECVFROM_TIMEOUT
+        #define KEY_SOCKET_RECVFROM_TIMEOUT 50
+    #endif
 #endif
 
 int KeySocket_Init(void)
@@ -489,7 +493,7 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
     unsigned int ret;
     int error = 0;
 
-    ret = nx_udp_socket_receive(nxSock, &nxPacket, 50);
+    ret = nx_udp_socket_receive(nxSock, &nxPacket, KEY_SOCKET_RECVFROM_TIMEOUT);
     if (ret != NX_SUCCESS) {
         error = 1;
         /* This may be due to a non-block. Report the error later. */
