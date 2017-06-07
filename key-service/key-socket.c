@@ -753,6 +753,15 @@ void KeySocket_Unlisten(const unsigned short srvPort)
 #endif
 }
 
+void KeySocket_Unaccept(KS_SOCKET_T sockfd)
+{
+    if (sockfd != KS_SOCKET_T_INIT) {
+#ifdef HAVE_NETX
+        nx_tcp_server_socket_unaccept(sockfd);
+#endif
+    }
+}
+
 void KeySocket_Unbind(KS_SOCKET_T sockfd)
 {
     if (sockfd != KS_SOCKET_T_INIT) {
