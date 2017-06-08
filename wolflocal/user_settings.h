@@ -42,18 +42,29 @@
 #define NO_MAIN_DRIVER
 #define BENCH_EMBEDDED
 
-#define LOCAL_ADDR "192.168.2.2"
-#define KEY_SERV_LOCAL_ADDR 192,168,2,2
-#define KEY_BCAST_ADDR 192,168,2,255
+#ifdef PGB000
+    #define LOCAL_ADDR "192.168.1.20"
+    #define KEY_SERV_LOCAL_ADDR 192,168,1,20
+    /* My local DHCP server always provides this address to the PGB000. */
+#else
+    #define LOCAL_ADDR "192.168.1.80"
+    #define KEY_SERV_LOCAL_ADDR 192,168,1,80
+    /* PGB002 isn't using DHCP, it is hardcoded to this address. */
+#endif
+#define KEY_BCAST_ADDR 192,168,1,255
 
-#if 0
 #define KEY_SOCKET_LOGGING_LEVEL 3
 #define KEY_SERVICE_LOGGING_LEVEL 3
 #define WOLFCAST_LOGGING_LEVEL 3
+#define WOLFLOCAL_LOGGING_LEVEL_3
+#if 0
 #define DEBUG_WOLFSSL
 #define WOLFSSL_DEBUG_MEMORY
 #endif
-#define WOLFCAST_LOGGING_LEVEL 3
+
+#ifdef PGB002
+    #define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET
+#endif
 
 #define WOLFSSL_MAX_MTU 256
 #define WOLFMEM_BUCKETS 64,128,256,384,1024,4544
@@ -61,8 +72,10 @@
 #define WOLFMEM_MAX_BUCKETS 6
 /* The static memory size is based on the above constants, and calculated
  * by the function wolfSSL_StaticBufferSz(). */
-#define WOLFLOCAL_STATIC_MEMORY_SZ 25424
+//#define WOLFLOCAL_STATIC_MEMORY_SZ 25424
+#define WOLFLOCAL_STATIC_MEMORY_SZ 50000
 
+#define KEY_SOCKET_RECVFROM_TIMEOUT 300
 
 int mySeed(unsigned char* output, unsigned int sz);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)
