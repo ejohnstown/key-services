@@ -48,6 +48,7 @@
     #include <sys/socket.h>
     #include <sys/select.h>
     #include <fcntl.h>
+    #include <pthread.h>
 
     static unsigned int WCTIME(void)
     {
@@ -592,6 +593,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
 
 static int rekeyTrigger = 1;
+static int keySwapTrigger = 1;
 const char seqHwCbCtx[] = "Callback context string.";
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
@@ -608,7 +610,7 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
     (void)ctx;
 #endif
 
-    rekeyTrigger = 1;
+    /*rekeyTrigger = 1; */
 
     return 0;
 }
@@ -1135,6 +1137,49 @@ WolfcastServer(WOLFSSL *ssl)
 
 #define PEER_ID_LIST_SZ 99
 
+    static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+    {
+        if (pkt) {
+            if (pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+                /* trigger key change */
+                unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
+                rekeyTrigger = 1;
+
+                printf("Key Change Server: %d.%d.%d.%d\n",
+                    addr[0], addr[1], addr[2], addr[3]);
+            }
+            else if (pkt->header.type == CMD_PKT_TYPE_KEY_USE) {
+                /* use the new key */
+                unsigned char* epoch = pkt->msg.epochResp.epoch;
+                keySwapTrigger = 1;
+
+                printf("Use the new key for epoch %u.\n",
+                    ((epoch[0] << 8)|(epoch[1])));
+            }
+        }
+    }
+
+    static void* KeyBcastThread(void* arg)
+    {
+        int ret;
+        struct in_addr srvAddr;
+        unsigned char addr[4] = {KEY_BCAST_ADDR};
+
+        (void)arg;
+
+        XMEMCPY(&srvAddr.s_addr, addr, sizeof(srvAddr.s_addr));
+
+        ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, NULL);
+
+        if (ret) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            WCPRINTF("error: KeyBcast_RunUdb returned %d\n", ret);
+#endif
+        }
+
+        return NULL;
+    }
+
 int
 main(
     int argc,
@@ -1152,6 +1197,7 @@ main(
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
     struct in_addr keySrvAddr;
+    pthread_t tid;
 
     memset(&keySrvAddr, 0, sizeof(keySrvAddr));
 
@@ -1245,19 +1291,25 @@ main(
     if (isClient) {
 #ifndef NO_WOLFCAST_CLIENT
         unsigned int txtime, count;
+        KeyRespPacket_t keyResp;
+        unsigned short newEpoch;
 
         if (!error)
             error = WolfcastClientInit(&txtime, &count);
+
+        /* spin up another thread for UDP broadcast */
+        ret = pthread_create(&tid, NULL, KeyBcastThread, NULL);
+        if (ret < 0) {
+            printf("Pthread create failed for UDP\n");
+            error = 1;
+        }
+        pthread_detach(tid);
 
         while (!error) {
             fd_set readfds;
             struct timeval timeout = {0, 500000};
 
             if (rekeyTrigger) {
-                WOLFSSL *newSsl;
-                KeyRespPacket_t keyResp;
-                unsigned short newEpoch;
-
                 if (!error) {
                     unsigned char addr[4] = {KEY_BCAST_ADDR};
                     memcpy(&keySrvAddr.s_addr, addr, sizeof(addr));
@@ -1304,6 +1356,10 @@ main(
                         goto skipRekey;
                     }
                 }
+            }
+
+            if (keySwapTrigger) {
+                WOLFSSL *newSsl;
 
                 if (prevSsl != NULL) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
@@ -1348,9 +1404,10 @@ main(
                 }
 
                 rekeyTrigger = 0;
-skipRekey:
+                keySwapTrigger = 0;
                 memset(&keyResp, 0, sizeof(keyResp));
             }
+skipRekey:
 
             if (curSsl != NULL) {
                 FD_ZERO(&readfds);
