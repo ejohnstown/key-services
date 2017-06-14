@@ -704,7 +704,7 @@ static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* ms
     reqPkt.header.type = type;
 
     /* write request to the server */
-    if (wolfSSL_write(ssl, req, sizeof(reqPkt)) != sizeof(reqPkt)) {
+    if (wolfSSL_write(ssl, req, sizeof(reqPkt.header)) != sizeof(reqPkt.header)) {
         ret = wolfSSL_get_error(ssl, 0);
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyClient_Perform: Write error %d to Server\n", ret);

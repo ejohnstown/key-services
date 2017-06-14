@@ -472,6 +472,7 @@ WolfCastClientEntry(ULONG ignore)
     unsigned short epoch = 0;
     unsigned int txTime;
     unsigned int txCount;
+    unsigned int lastTxCount = 0;
     int error;
     int result;
     UINT status;
@@ -606,6 +607,23 @@ WolfCastClientEntry(ULONG ignore)
         if (!error)
             error = WolfcastClient(&socketInfo, curSsl, prevSsl, epoch,
                                    CLIENT_ID, &txTime, &txCount);
+
+        if (KeyServer_IsRunning()) {
+            if (txCount != lastTxCount) {
+                lastTxCount = txCount;
+                if ((txCount % 12) == 0) {
+                    gSwitchKeys = 1;
+                    status = KeyServer_NewKeyUse(gHeapHint);
+                    if (status) {
+                        error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                        KS_PRINTF("Failed to announce key switch.\n");
+#endif
+                    }
+                }
+            }
+        }
+
         tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
 }

@@ -593,7 +593,6 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
 
 static int rekeyTrigger = 1;
-static int keySwapTrigger = 1;
 const char seqHwCbCtx[] = "Callback context string.";
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
@@ -1134,6 +1133,7 @@ WolfcastServer(WOLFSSL *ssl)
 
 #ifndef NO_MAIN_DRIVER
 
+static int keySwapTrigger = 1;
 
 #define PEER_ID_LIST_SZ 99
 
