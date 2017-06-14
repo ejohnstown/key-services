@@ -93,7 +93,7 @@ int main(int argc, char **argv)
         printf("Pthread create failed for UDP\n");
         goto exit;
     }
-    pthread_join(tid, NULL);
+    pthread_detach(tid);
 #endif
 
     ret = KeyClient_FindMaster(&gKeySrvAddr, heap);
