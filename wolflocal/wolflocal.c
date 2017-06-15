@@ -500,7 +500,7 @@ WolfCastClientEntry(ULONG ignore)
                 else {
                     keySet = 0;
 #if WOLFCAST_LOGGING_LEVEL >= 3
-                    KS_PRINTF("Ignoring old epoch.\n");
+                    KS_PRINTF("Ignoring old epoch (%u:%u).\n", newEpoch, epoch);
 #endif
                 }
 
@@ -654,8 +654,14 @@ void WolfLocalTimer(void)
 
     /* Give it a 15 count before trying to do anything. */
     if (count > 15) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+        KS_PRINTF("timer: %u\n", count);
+#endif
         /* Every 10 second on the 10, generate new key. */
         if ((count % 10) == 0) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+            KS_PRINTF("timer: 10 on the 10\n");
+#endif
             ret = KeyServer_GenNewKey(gHeapHint);
             if (ret) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -667,6 +673,9 @@ void WolfLocalTimer(void)
         }
         /* Every 10 seconds on the 2, announce new key change. */
         else if ((count % 10) == 2) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+            KS_PRINTF("timer: 10 on the 2\n");
+#endif
             if (KeyServer_IsRunning()) {
                 ret = KeyServer_NewKeyUse(gHeapHint);
                 if (ret) {
