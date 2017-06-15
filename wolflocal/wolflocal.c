@@ -663,7 +663,7 @@ void WolfLocalTimer(void)
 #endif
             }
             else
-                gGetNewKey = 1;
+                gKeySet = 1;
         }
         /* Every 10 seconds on the 2, announce new key change. */
         else if ((count % 10) == 2) {
@@ -681,10 +681,10 @@ void WolfLocalTimer(void)
         /* Roughly... */
     }
 
-#else /* PGB000 */
+#else /* PGB000:PGB002 */
 #ifdef WOLFLOCAL_TEST_KEY_REQUEST
 
 #endif /* WOLFLOCAL_TEST_KEY_REQUEST */
-#endif /* PGB000 */
+#endif /* PGB002 */
 
 }
