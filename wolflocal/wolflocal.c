@@ -345,7 +345,7 @@ KeyClientEntry(ULONG ignore)
 }
 
 
-#ifdef PGB000
+#if 0
 
 static int
 sequenceCb(
@@ -361,56 +361,6 @@ sequenceCb(
     (void)curSeq;
     (void)ctx;
 
-#ifndef WOLFLOCAL_TEST_KEY_REQUEST
-
-    if (curSeq >= maxSeq) {
-        status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
-        if (status != TX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-            KS_PRINTF("wolfCast callback couldn't get state mutex\n");
-#endif
-        }
-        else {
-            int ret;
-
-            ret = KeyServer_GenNewKey(gHeapHint);
-            if (ret != 0) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                KS_PRINTF("wolfCast callback couldn't generate new key\n");
-#endif
-            }
-
-            status = tx_mutex_put(&gKeyStateMutex);
-            if (status != TX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                KS_PRINTF("wolfCast callback couldn't put state mutex\n");
-#endif
-            }
-        }
-    }
-
-#endif /* WOLFLOCAL_TEST_KEY_REQUEST */
-
-    return status != TX_SUCCESS;
-}
-
-#else /* PGB000 */
-
-static int
-sequenceCb(
-        unsigned short peerId,
-        unsigned int maxSeq,
-        unsigned int curSeq,
-        void* ctx)
-{
-    UINT status = TX_SUCCESS;
-
-    (void)peerId;
-    (void)maxSeq;
-    (void)curSeq;
-    (void)ctx;
-
-#ifdef WOLFLOCAL_TEST_KEY_REQUEST
 
     if (curSeq >= maxSeq) {
         status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
@@ -448,8 +398,6 @@ sequenceCb(
         }
     }
 
-#endif /* WOLFLOCAL_TEST_KEY_REQUEST */
-
     return status != TX_SUCCESS;
 }
 
@@ -472,7 +420,6 @@ WolfCastClientEntry(ULONG ignore)
     unsigned short epoch = 0;
     unsigned int txTime;
     unsigned int txCount;
-    unsigned int lastTxCount = 0;
     int error;
     int result;
     UINT status;
@@ -499,16 +446,6 @@ WolfCastClientEntry(ULONG ignore)
     error = WolfcastInit(1, CLIENT_ID, &ctx, &socketInfo);
     if (!error) {
         error = WolfcastClientInit(&txTime, &txCount);
-    }
-
-    if (!error) {
-        result = wolfSSL_CTX_mcast_set_highwater_cb(ctx, 10, 8, 0, sequenceCb);
-        if (result != SSL_SUCCESS) {
-            error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-            KS_PRINTF("set mcast highwater cb error\n");
-#endif
-        }
     }
 
     if (!error) {
@@ -608,22 +545,6 @@ WolfCastClientEntry(ULONG ignore)
             error = WolfcastClient(&socketInfo, curSsl, prevSsl, epoch,
                                    CLIENT_ID, &txTime, &txCount);
 
-        if (KeyServer_IsRunning()) {
-            if (txCount != lastTxCount) {
-                lastTxCount = txCount;
-                if ((txCount % 12) == 0) {
-                    gSwitchKeys = 1;
-                    status = KeyServer_NewKeyUse(gHeapHint);
-                    if (status) {
-                        error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                        KS_PRINTF("Failed to announce key switch.\n");
-#endif
-                    }
-                }
-            }
-        }
-
         tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
 }
@@ -719,4 +640,51 @@ WolfLocalInit(void)
     }
 
     return;
+}
+
+
+void WolfLocalTimer(void)
+{
+    static unsigned int count = 0;
+    int ret;
+
+    count++;
+
+#ifdef PGB000
+
+    /* Give it a 15 count before trying to do anything. */
+    if (count > 15) {
+        /* Every 10 second on the 10, generate new key. */
+        if ((count % 10) == 0) {
+            ret = KeyServer_GenNewKey(gHeapHint);
+            if (ret) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("Failed to announce new key.\n");
+#endif
+            }
+            else
+                gGetNewKey = 1;
+        }
+        /* Every 10 seconds on the 2, announce new key change. */
+        else if ((count % 10) == 2) {
+            if (KeyServer_IsRunning()) {
+                ret = KeyServer_NewKeyUse(gHeapHint);
+                if (ret) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                    KS_PRINTF("Failed to announce key switch.\n");
+#endif
+                }
+                else
+                    gSwitchKeys = 1;
+            }
+        }
+        /* Roughly... */
+    }
+
+#else /* PGB000 */
+#ifdef WOLFLOCAL_TEST_KEY_REQUEST
+
+#endif /* WOLFLOCAL_TEST_KEY_REQUEST */
+#endif /* PGB000 */
+
 }
