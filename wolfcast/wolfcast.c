@@ -1339,6 +1339,7 @@ main(
 #endif
                         goto skipRekey;
                     }
+                    rekeyTrigger = 0;
                 }
 
                 if (!error) {
@@ -1352,7 +1353,6 @@ main(
 #if WOLFCAST_LOGGING_LEVEL >= 3
                         WCPRINTF("Ignoring already used epoch.\n");
 #endif
-                        rekeyTrigger = 0;
                         goto skipRekey;
                     }
                 }
