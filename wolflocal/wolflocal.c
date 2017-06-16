@@ -247,9 +247,9 @@ static void
 KeyClientEntry(ULONG ignore)
 {
     int result;
-    int findMaster = 0;
-    int getNewKey = 0;
-    int storeKey = 0;
+    UINT findMaster = 0;
+    UINT getNewKey = 0;
+    UINT storeKey = 0;
     UINT status = TX_SUCCESS;
     KeyRespPacket_t keyResp;
 
@@ -364,7 +364,8 @@ WolfCastClientEntry(ULONG ignore)
     int result;
     UINT status;
     KeyRespPacket_t keyState;
-    int keySet = 0;
+    UINT keySet = 0;
+    UINT switchKeys = 0;
     const unsigned short peerIdList[] =
                             { SERVER_ID, OTHER_CLIENT_ID, FOREIGN_CLIENT_ID };
 
@@ -420,9 +421,12 @@ WolfCastClientEntry(ULONG ignore)
 
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
-                if (gKeySet) {
-                    keySet = 1;
-                    gKeySet = 0;
+                keySet = gKeySet;
+                gKeySet = 0;
+                switchKeys = gSwitchKeys;
+                gSwitchKeys = 0;
+
+                if (keySet) {
                     memcpy(&keyState, &gKeyState, sizeof(keyState));
                 }
                 status = tx_mutex_put(&gKeyStateMutex);
@@ -451,8 +455,8 @@ WolfCastClientEntry(ULONG ignore)
 #endif
             }
 
-            if (!error && newSsl != NULL && gSwitchKeys) {
-                gSwitchKeys = 0;
+            if (!error && newSsl != NULL && switchKeys) {
+                switchKeys = 0;
                 result = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyState.pms, sizeof(keyState.pms),
                                 keyState.clientRandom, keyState.serverRandom,
@@ -586,6 +590,7 @@ WolfLocalInit(void)
 void WolfLocalTimer(void)
 {
     static unsigned int count = 0;
+    UINT status;
     int ret;
 
     count++;
@@ -608,8 +613,14 @@ void WolfLocalTimer(void)
                 KS_PRINTF("Failed to announce new key.\n");
 #endif
             }
-            else
-                gGetNewKey = 1;
+            else {
+                status = tx_mutex_get(&gKeyStateMutex,
+                                      KS_TIMEOUT_KEY_STATE_WRITE);
+                if (status == TX_SUCCESS) {
+                    gGetNewKey = 1;
+                    tx_mutex_put(&gKeyStateMutex);
+                }
+            }
         }
 
         /* Every 10 seconds on the 2, announce new key change. */
@@ -624,8 +635,14 @@ void WolfLocalTimer(void)
                     KS_PRINTF("Failed to announce key switch.\n");
 #endif
                 }
-                else
-                    gSwitchKeys = 1;
+                else {
+                    status = tx_mutex_get(&gKeyStateMutex,
+                                          KS_TIMEOUT_KEY_STATE_WRITE);
+                    if (status == TX_SUCCESS) {
+                        gSwitchKeys = 1;
+                        tx_mutex_put(&gKeyStateMutex);
+                    }
+                }
             }
         }
     }
