@@ -892,7 +892,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
         ret = -1;
         goto exit;
     }
-    clientAddr.sin_addr.s_addr = addr | 0xFF;
+    clientAddr.sin_addr.s_addr = addr | ~mask;
 #endif
 
     /* send broadcast */
