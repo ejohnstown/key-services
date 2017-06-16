@@ -357,7 +357,9 @@ WolfCastClientEntry(ULONG ignore)
     WOLFSSL_CTX *ctx = NULL; /* Used in the WOLFSSL object. */
     WOLFSSL *curSsl = NULL;
     WOLFSSL *prevSsl = NULL;
+    WOLFSSL *newSsl = NULL;
     unsigned short epoch = 0;
+    unsigned short newEpoch;
     unsigned int txTime;
     unsigned int txCount;
     int error;
@@ -416,9 +418,6 @@ WolfCastClientEntry(ULONG ignore)
 
     while (1) {
         if (!error) {
-            WOLFSSL *newSsl = NULL;
-            unsigned short newEpoch;
-
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
                 keySet = gKeySet;
