@@ -429,6 +429,7 @@ WolfCastClientEntry(ULONG ignore)
             }
 
             if (status == TX_SUCCESS && keySet) {
+                keySet = 0;
                 newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
 
                 if (newEpoch > epoch) {
@@ -438,7 +439,6 @@ WolfCastClientEntry(ULONG ignore)
                                   sizeof(peerIdList) / sizeof(peerIdList[0]));
                 }
                 else {
-                    keySet = 0;
 #if WOLFCAST_LOGGING_LEVEL >= 3
                     KS_PRINTF("Ignoring old epoch (%u:%u).\n", newEpoch, epoch);
 #endif
@@ -451,8 +451,7 @@ WolfCastClientEntry(ULONG ignore)
 #endif
             }
 
-            if (!error && newSsl != NULL && keySet && gSwitchKeys) {
-                keySet = 0;
+            if (!error && newSsl != NULL && gSwitchKeys) {
                 gSwitchKeys = 0;
                 result = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyState.pms, sizeof(keyState.pms),
@@ -477,6 +476,7 @@ WolfCastClientEntry(ULONG ignore)
                     prevSsl = curSsl;
                     curSsl = newSsl;
                     epoch = newEpoch;
+                    newSsl = NULL;
                 }
             }
         }
