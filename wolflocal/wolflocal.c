@@ -71,7 +71,6 @@ unsigned int LowResTimer(void)
 #else /* PGB006 */
     #define CLIENT_ID 7
     #define OTHER_CLIENT_ID 6
-    #define WOLFLOCAL_TEST_KEY_REQUEST
 #endif
 
 
@@ -88,7 +87,7 @@ static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[KS_STACK_SZ];
 static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
 
-#ifndef WOLFLOCAL_TEST_KEY_REQUEST
+#ifdef WOLFLOCAL_TEST_KEY_SERVER
     static TX_THREAD gKeyServerThread;
     static char gKeyServerStack[KS_STACK_SZ];
 #endif
@@ -128,7 +127,7 @@ static int isNetworkReady(ULONG timeout)
 }
 
 
-#ifndef WOLFLOCAL_TEST_KEY_REQUEST
+#ifdef WOLFLOCAL_TEST_KEY_SERVER
 
 /* KeyServerEntry
  * Thread entry point to drive the key server. Key server really
@@ -345,65 +344,6 @@ KeyClientEntry(ULONG ignore)
 }
 
 
-#if 0
-
-static int
-sequenceCb(
-        unsigned short peerId,
-        unsigned int maxSeq,
-        unsigned int curSeq,
-        void* ctx)
-{
-    UINT status = TX_SUCCESS;
-
-    (void)peerId;
-    (void)maxSeq;
-    (void)curSeq;
-    (void)ctx;
-
-
-    if (curSeq >= maxSeq) {
-        status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
-        if (status != TX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-            KS_PRINTF("wolfCast callback couldn't get state mutex\n");
-#endif
-        }
-        else {
-            int ret;
-
-            if (curSeq >= maxSeq) {
-                EpochRespPacket_t newEpoch;
-                ret = KeyClient_NewKeyRequest(&gKeySrvAddr, &newEpoch, gHeapHint);
-                if (ret != 0) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                    KS_PRINTF("wolfCast callback couldn't request new key\n");
-#endif
-                }
-                else {
-                    gGetNewKey = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 2
-                    KS_PRINTF("Key server offering epoch %u\n",
-                              (newEpoch.epoch[0] << 8 | newEpoch.epoch[1]));
-#endif
-                }
-            }
-
-            status = tx_mutex_put(&gKeyStateMutex);
-            if (status != TX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                KS_PRINTF("wolfCast callback couldn't put state mutex\n");
-#endif
-            }
-        }
-    }
-
-    return status != TX_SUCCESS;
-}
-
-#endif /* PGB000 */
-
-
 /* WolfCastClientEntry
  * Thread entry point to drive the wolfCast client. This wraps
  * the old chunk of code from test.c that was executed in the
@@ -601,7 +541,7 @@ WolfLocalInit(void)
         return;
     }
 
-#ifndef WOLFLOCAL_TEST_KEY_REQUEST
+#ifdef WOLFLOCAL_TEST_KEY_SERVER
     status = tx_thread_create(&gKeyServerThread, "key service server",
                            KeyServerEntry, 0,
                            gKeyServerStack, sizeof(gKeyServerStack),
@@ -650,14 +590,14 @@ void WolfLocalTimer(void)
 
     count++;
 
-#ifdef PGB000
+#ifdef WOLFLOCAL_TEST_KEY_SERVER
 
     /* Give it a 15 count before trying to do anything. */
     if (count > 15) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
-        /* Every 10 second on the 10, generate new key. */
+        /* Every 10 seconds on the 10, generate new key. */
         if ((count % 10) == 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: 10 on the 10\n");
@@ -669,10 +609,11 @@ void WolfLocalTimer(void)
 #endif
             }
             else
-                gKeySet = 1;
+                gGetNewKey = 1;
         }
+
         /* Every 10 seconds on the 2, announce new key change. */
-        else if ((count % 10) == 2) {
+        if ((count % 10) == 2) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: 10 on the 2\n");
 #endif
@@ -687,13 +628,38 @@ void WolfLocalTimer(void)
                     gSwitchKeys = 1;
             }
         }
-        /* Roughly... */
     }
 
-#else /* PGB000:PGB002 */
+#endif /* WOLFLOCAL_TEST_KEY_SERVER */
+
 #ifdef WOLFLOCAL_TEST_KEY_REQUEST
 
+    /* Give it a 15 count before trying to do anything. */
+    if (count > 15) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+        KS_PRINTF("timer: %u\n", count);
+#endif
+        /* Every 10 seconds on the 10, request new key. */
+        if ((count % 10) == 0) {
+            EpochRespPacket_t epochResp;
+#if WOLFCAST_LOGGING_LEVEL >= 3
+            KS_PRINTF("timer: 10 on the 10\n");
+#endif
+            ret = KeyClient_NewKeyRequest(&gKeySrvAddr, &epochResp, gHeapHint);
+            if (ret) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("Failed to request new key.\n");
+#endif
+            }
+            else {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("New epoch will be %u.\n",
+                          ((epochResp.epoch[0] << 8) | epochResp.epoch[1]);
+#endif
+            }
+        }
+    }
+
 #endif /* WOLFLOCAL_TEST_KEY_REQUEST */
-#endif /* PGB002 */
 
 }

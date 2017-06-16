@@ -45,7 +45,7 @@
 #ifdef PGB000
     #define LOCAL_ADDR "192.168.1.20"
     #define KEY_SERV_LOCAL_ADDR 192,168,1,20
-    /* My local DHCP server always provides this address to the PGB000. */
+    /* My local DHCP server always provides this address to PGB000. */
 #else
     #define LOCAL_ADDR "192.168.1.80"
     #define KEY_SERV_LOCAL_ADDR 192,168,1,80
@@ -56,15 +56,18 @@
 #define KEY_SOCKET_LOGGING_LEVEL 3
 #define KEY_SERVICE_LOGGING_LEVEL 3
 #define WOLFCAST_LOGGING_LEVEL 3
-#define WOLFLOCAL_LOGGING_LEVEL_3
+#define WOLFLOCAL_LOGGING_LEVEL 3
 #if 0
 #define DEBUG_WOLFSSL
 #define WOLFSSL_DEBUG_MEMORY
 #endif
 
-#ifdef PGB002
+#ifdef PGB000
+    #define WOLFLOCAL_TEST_KEY_SERVER
+#else /* PGB000/PGB002 */
+    #define WOLFLOCAL_TEST_KEY_REQUEST
     #define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET
-#endif
+#endif /* PGB002 */
 
 #define WOLFSSL_MAX_MTU 256
 #define WOLFMEM_BUCKETS 64,128,256,384,1024,4544
