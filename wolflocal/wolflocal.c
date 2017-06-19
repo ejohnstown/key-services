@@ -100,6 +100,7 @@ static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
 static TX_MUTEX gKeyStateMutex;
 static UINT gKeySet = 0;
 UINT gGetNewKey = 1;
+UINT gRequestRekey = 0;
 static UINT gFindMaster = 1;
 static UINT gSwitchKeys = 1;
 static KeyRespPacket_t gKeyState;
@@ -248,6 +249,7 @@ KeyClientEntry(ULONG ignore)
 {
     int result;
     UINT findMaster = 0;
+    UINT requestRekey = 0;
     UINT getNewKey = 0;
     UINT storeKey = 0;
     UINT status = TX_SUCCESS;
@@ -277,13 +279,15 @@ KeyClientEntry(ULONG ignore)
     }
 
     while (1) {
-        if (!findMaster && !getNewKey && !storeKey) {
+        if (!findMaster && !requestRekey && !getNewKey && !storeKey) {
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
                 findMaster = gFindMaster;
                 gFindMaster = 0;
                 getNewKey = gGetNewKey;
                 gGetNewKey = 0;
+                requestRekey = gRequestRekey;
+                gRequestRekey = 0;
                 tx_mutex_put(&gKeyStateMutex);
             }
             else {
@@ -302,6 +306,23 @@ KeyClientEntry(ULONG ignore)
             }
             else {
                 findMaster = 0;
+            }
+        }
+
+        if (!findMaster && requestRekey && !storeKey) {
+            EpochRespPacket_t epochResp;
+            result = KeyClient_NewKeyRequest(&gKeySrvAddr, &epochResp, gHeapHint);
+            if (result) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("Failed to request new key.\n");
+#endif
+            }
+            else {
+                requestRekey = 0;
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                KS_PRINTF("New epoch will be %u.\n",
+                          ((epochResp.epoch[0] << 8) | epochResp.epoch[1]));
+#endif
             }
         }
 
@@ -589,7 +610,11 @@ WolfLocalInit(void)
 void WolfLocalTimer(void)
 {
     static unsigned int count = 0;
+    UINT status;
     int ret;
+
+    (void)status;
+    (void)ret;
 
     count++;
 
@@ -597,8 +622,6 @@ void WolfLocalTimer(void)
 
     /* Give it a 15 count before trying to do anything. */
     if (count > 15) {
-        UINT status;
-
 #if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
@@ -658,21 +681,13 @@ void WolfLocalTimer(void)
 #endif
         /* Every 10 seconds on the 10, request new key. */
         if ((count % 10) == 0) {
-            EpochRespPacket_t epochResp;
 #if WOLFCAST_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: 10 on the 10\n");
 #endif
-            ret = KeyClient_NewKeyRequest(&gKeySrvAddr, &epochResp, gHeapHint);
-            if (ret) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                KS_PRINTF("Failed to request new key.\n");
-#endif
-            }
-            else {
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                KS_PRINTF("New epoch will be %u.\n",
-                          ((epochResp.epoch[0] << 8) | epochResp.epoch[1]));
-#endif
+            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
+            if (status == NX_SUCCESS) {
+                gRequestRekey = 1;
+                tx_mutex_put(&gKeyStateMutex);
             }
         }
     }
