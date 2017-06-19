@@ -829,8 +829,8 @@ exit:
 #endif
 
     wolfSSL_shutdown(ssl);
-    KeySocket_Unbind(sockfd);
     KeySocket_Close(&sockfd);
+    KeySocket_Unbind(sockfd);
     KeySocket_Delete(&sockfd);
 
     /* cleanup */
