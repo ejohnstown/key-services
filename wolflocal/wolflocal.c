@@ -589,7 +589,6 @@ WolfLocalInit(void)
 void WolfLocalTimer(void)
 {
     static unsigned int count = 0;
-    UINT status;
     int ret;
 
     count++;
@@ -598,6 +597,8 @@ void WolfLocalTimer(void)
 
     /* Give it a 15 count before trying to do anything. */
     if (count > 15) {
+        UINT status;
+
 #if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
@@ -670,7 +671,7 @@ void WolfLocalTimer(void)
             else {
 #if WOLFCAST_LOGGING_LEVEL >= 1
                 KS_PRINTF("New epoch will be %u.\n",
-                          ((epochResp.epoch[0] << 8) | epochResp.epoch[1]);
+                          ((epochResp.epoch[0] << 8) | epochResp.epoch[1]));
 #endif
             }
         }
