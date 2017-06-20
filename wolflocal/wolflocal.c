@@ -187,7 +187,7 @@ static void
 broadcastCb(CmdPacket_t* pkt)
 {
     if (pkt) {
-        switch (pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+        switch (pkt->header.type) {
             case CMD_PKT_TYPE_KEY_CHG:
                 {
                     /* trigger key change */
