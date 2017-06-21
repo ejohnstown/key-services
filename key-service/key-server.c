@@ -24,6 +24,35 @@ static void* KeyBcastThread(void* arg)
 }
 
 
+static void* RekeyThread(void* arg)
+{
+    int ret;
+    void* heap = arg;
+
+    while (1) {
+        sleep(30);
+        printf("Generating and announcing new key.\n");
+        ret = KeyServer_GenNewKey(heap);
+        if (ret != 0) {
+            printf("KeyServer_GenNewKey() failed, ret = %d\n", ret);
+            break;
+        }
+
+        sleep(5);
+        printf("SWITCH!\n");
+        ret = KeyServer_NewKeyUse(heap);
+        if (ret != 0) {
+            printf("KeyServer_NewKeyUse() failed, ret = %d\n", ret);
+            break;
+        }
+    }
+
+    printf("Rekey Thread failed and exited.\n");
+
+    return (void*)((size_t)ret);
+}
+
+
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -54,6 +83,13 @@ int main(int argc, char **argv)
     ret = pthread_create(&tid, NULL, KeyBcastThread, heap);
     if (ret < 0) {
         printf("Pthread create failed for UDP\n");
+        goto exit;
+    }
+    pthread_detach(tid);
+
+    ret = pthread_create(&tid, NULL, RekeyThread, heap);
+    if (ret < 0) {
+        printf("Pthread create failed for Rekey\n");
         goto exit;
     }
     pthread_detach(tid);
