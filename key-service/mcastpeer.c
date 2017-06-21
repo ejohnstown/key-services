@@ -356,10 +356,24 @@ exit:
     return NULL;
 }
 
+void KeyServerReqPktCallback(CmdPacket_t* pkt)
+{
+    if (pkt == NULL)
+        return;
+
+    if (pkt->header.type == CMD_PKT_TYPE_KEY_REQ) {
+        printf("Key request.\n");
+    }
+
+    if (pkt->header.type == CMD_PKT_TYPE_KEY_NEW) {
+        printf("Rekey request.\n");
+    }
+}
+
 static void* KeyServerThread(void* arg)
 {
     void* heap = arg;
-    KeyServer_Run(heap);
+    KeyServer_Run(KeyServerReqPktCallback, heap);
     return NULL;
 }
 

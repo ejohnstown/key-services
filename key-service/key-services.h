@@ -86,6 +86,7 @@ typedef struct EpochRespPacket {
 typedef struct CmdHeader {
     unsigned char version; /* Version = 1 - Allows future protocol changes */
     unsigned char type;    /* Type: 0=Discovery, 1=KeyChg, 2=KeyReq, ...Future Commands */
+    unsigned char id;      /* Peer ID: 0-255 */
     unsigned char size[2]; /* Message Size (remaining packet bytes to follow) */
 } WOLFSSL_PACK CmdHeader_t;
 
@@ -126,7 +127,8 @@ static const unsigned char g_TlsPsk[4] = {
 
 /* API's */
 int KeyServer_Init(void* heap);
-int KeyServer_Run(void* heap);
+typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
+int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
 int KeyServer_IsRunning(void);
 void KeyServer_Stop(void);
 int KeyServer_GenNewKey(void* heap);

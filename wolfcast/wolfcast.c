@@ -307,6 +307,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
 extern UINT gGetNewKey;
 extern UINT gSwitchKeys;
+extern unsigned char gPeerId;
 
 static int
 NetxDtlsTxCallback(
@@ -1276,6 +1277,8 @@ main(
                  "       wolfcast server <id>\n");
 #endif
     }
+
+    gPeerId = myId;
 
     if (!error) {
         error = WolfcastInit(isClient, myId, &ctx, &si);

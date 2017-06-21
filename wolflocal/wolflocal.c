@@ -106,9 +106,11 @@ UINT gSwitchKeys = 1;
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
+static WOLFSSL* gCurSsl = NULL;
 
 extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
+extern unsigned char gPeerId;
 
 
 static int isNetworkReady(ULONG timeout)
@@ -130,6 +132,24 @@ static int isNetworkReady(ULONG timeout)
 
 
 #ifdef WOLFLOCAL_TEST_KEY_SERVER
+
+
+static void
+keyServerCb(CmdPacket_t* pkt)
+{
+    if (pkt) {
+        if (pkt->header.type == CMD_PKT_TYPE_KEY_REQ) {
+            if (wolfSSL_mcast_peer_known(gCurSsl, pkt->header.id)) {
+                pkt->header.type = CMD_PKT_TYPE_KEY_NEW;
+            }
+        }
+
+        if (pkt->header.type == CMD_PKT_TYPE_KEY_NEW) {
+            KeyServer_GenNewKey(gHeapHint);
+        }
+    }
+}
+
 
 /* KeyServerEntry
  * Thread entry point to drive the key server. Key server really
@@ -169,7 +189,7 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
-        result = KeyServer_Run(gHeapHint);
+        result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
             KS_PRINTF("KeyServer terminated. (%d)\n", result);
@@ -385,7 +405,6 @@ WolfCastClientEntry(ULONG ignore)
 {
     SocketInfo_t socketInfo; /* Used in the WOLFSSL object. */
     WOLFSSL_CTX *ctx = NULL; /* Used in the WOLFSSL object. */
-    WOLFSSL *curSsl = NULL;
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
     unsigned short newEpoch;
@@ -448,6 +467,7 @@ WolfCastClientEntry(ULONG ignore)
 
     while (1) {
         if (!error) {
+            if (!keySet && !switchKeys) {
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
             if (status == TX_SUCCESS) {
                 keySet = gKeySet;
@@ -459,6 +479,7 @@ WolfCastClientEntry(ULONG ignore)
                     memcpy(&keyState, &gKeyState, sizeof(keyState));
                 }
                 status = tx_mutex_put(&gKeyStateMutex);
+            }
             }
 
             if (status == TX_SUCCESS && keySet) {
@@ -507,8 +528,8 @@ WolfCastClientEntry(ULONG ignore)
 #endif
                             wolfSSL_free(prevSsl);
                         }
-                        prevSsl = curSsl;
-                        curSsl = newSsl;
+                        prevSsl = gCurSsl;
+                        gCurSsl = newSsl;
                         epoch = newEpoch;
                         newSsl = NULL;
                     }
@@ -523,7 +544,7 @@ WolfCastClientEntry(ULONG ignore)
         }
 
         if (!error)
-            error = WolfcastClient(&socketInfo, curSsl, prevSsl, epoch,
+            error = WolfcastClient(&socketInfo, gCurSsl, prevSsl, epoch,
                                    CLIENT_ID, &txTime, &txCount);
 
         tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
@@ -542,6 +563,8 @@ WolfLocalInit(void)
 
     wolfcrypt_test(NULL);
     benchmark_test(NULL);
+
+    gPeerId = CLIENT_ID;
 
     if (KeySocket_Init() != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1

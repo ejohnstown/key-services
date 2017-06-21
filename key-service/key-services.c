@@ -33,6 +33,7 @@ static int            gKeyServerRunning = 0;
 static int            gKeyServerStop = 0;
        unsigned short gKeyServerEpoch;
 static struct in_addr gBcastAddr;
+unsigned char         gPeerId = 0;
 
 #ifdef WOLFSSL_STATIC_MEMORY
     #if defined(NETX) && defined(PGB002)
@@ -114,6 +115,7 @@ static inline int BuildPacket(CmdPacket_t** pPkt, int type, int msgLen,
     /* populate packet header */
     pkt->header.version = CMD_PKT_VERSION;
     pkt->header.type = type;
+    pkt->header.id = gPeerId;
     c16toa(msgLen, pkt->header.size);
 
     /* populate message */
@@ -456,7 +458,7 @@ exit:
     return ret;
 }
 
-int KeyServer_Run(void* heap)
+int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
 {
     int                 ret = 0;
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
@@ -550,6 +552,10 @@ int KeyServer_Run(void* heap)
                 #endif
                     goto cleanup;
                 }
+
+                if (reqCb)
+                    reqCb(&reqPkt);
+                /* This callback may modify the request. */
 
                 /* get response */
                 KeyReq_GetResp(reqPkt.header.type, &resp, &n);
@@ -702,6 +708,7 @@ static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* ms
     XMEMSET(&reqPkt, 0, sizeof(reqPkt));
     reqPkt.header.version = CMD_PKT_VERSION;
     reqPkt.header.type = type;
+    reqPkt.header.id = gPeerId;
 
     /* write request to the server */
     if (wolfSSL_write(ssl, req, sizeof(reqPkt.header)) != sizeof(reqPkt.header)) {

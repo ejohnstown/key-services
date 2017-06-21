@@ -53,6 +53,21 @@ static void* RekeyThread(void* arg)
 }
 
 
+static void KeyServerReqPktCallback(CmdPacket_t* pkt)
+{
+    if (pkt == NULL)
+        return;
+
+    if (pkt->header.type == CMD_PKT_TYPE_KEY_REQ) {
+        printf("Key request.\n");
+    }
+
+    if (pkt->header.type == CMD_PKT_TYPE_KEY_NEW) {
+        printf("Rekey request.\n");
+    }
+}
+
+
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -94,7 +109,7 @@ int main(int argc, char **argv)
     }
     pthread_detach(tid);
 
-    ret = KeyServer_Run(heap);
+    ret = KeyServer_Run(KeyServerReqPktCallback, heap);
 
 exit:
 
