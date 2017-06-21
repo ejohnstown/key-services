@@ -102,7 +102,7 @@ static UINT gKeySet = 0;
 UINT gGetNewKey = 1;
 UINT gRequestRekey = 0;
 static UINT gFindMaster = 1;
-static UINT gSwitchKeys = 1;
+UINT gSwitchKeys = 1;
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
@@ -198,7 +198,10 @@ broadcastCb(CmdPacket_t* pkt)
                 }
                 break;
             case CMD_PKT_TYPE_KEY_USE:
-                gSwitchKeys = 1;
+                {
+                    unsigned char* epoch = pkt->msg.epochResp.epoch;
+                    gSwitchKeys = (epoch[0] << 8) | epoch[1];
+                }
                 break;
         }
     }
@@ -378,7 +381,6 @@ WolfCastClientEntry(ULONG ignore)
     WOLFSSL_CTX *ctx = NULL; /* Used in the WOLFSSL object. */
     WOLFSSL *curSsl = NULL;
     WOLFSSL *prevSsl = NULL;
-    WOLFSSL *newSsl = NULL;
     unsigned short epoch = 0;
     unsigned short newEpoch;
     unsigned int txTime;
@@ -434,6 +436,7 @@ WolfCastClientEntry(ULONG ignore)
 #endif
             }
         }
+        gSwitchKeys = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
         keySet = 0;
     }
 
@@ -456,18 +459,6 @@ WolfCastClientEntry(ULONG ignore)
                 keySet = 0;
                 newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
 
-                if (newEpoch > epoch) {
-                    error = WolfcastSessionNew(&newSsl, ctx,
-                                  &socketInfo, 1,
-                                  peerIdList,
-                                  sizeof(peerIdList) / sizeof(peerIdList[0]));
-                }
-                else {
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                    KS_PRINTF("Ignoring old epoch (%u:%u).\n", newEpoch, epoch);
-#endif
-                }
-
 #if WOLFCAST_LOGGING_LEVEL >= 1
                 if (error) {
                     KS_PRINTF("Couldn't create new session\n");
@@ -475,32 +466,52 @@ WolfCastClientEntry(ULONG ignore)
 #endif
             }
 
-            if (!error && newSsl != NULL && switchKeys) {
-                switchKeys = 0;
-                result = wolfSSL_set_secret(newSsl, newEpoch,
-                                keyState.pms, sizeof(keyState.pms),
-                                keyState.clientRandom, keyState.serverRandom,
-                                keyState.suite);
-                if (result != SSL_SUCCESS) {
-                    error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                    KS_PRINTF("Couldn't set the session secret\n");
-#endif
-                }
+            if (switchKeys) {
+                if (switchKeys == newEpoch) {
+                    WOLFSSL *newSsl = NULL;
 
-                memset(&keyState, 0, sizeof(keyState));
-
-                if (!error) {
-                    if (prevSsl != NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                        KS_PRINTF("Releasing old session.\n");
-#endif
-                        wolfSSL_free(prevSsl);
+                    if (!error) {
+                        switchKeys = 0;
+                        error = WolfcastSessionNew(&newSsl, ctx,
+                                      &socketInfo, 1,
+                                      peerIdList,
+                                      sizeof(peerIdList) / sizeof(peerIdList[0]));
                     }
-                    prevSsl = curSsl;
-                    curSsl = newSsl;
-                    epoch = newEpoch;
-                    newSsl = NULL;
+                    if (!error) {
+                        result = wolfSSL_set_secret(newSsl, newEpoch,
+                                    keyState.pms, sizeof(keyState.pms),
+                                    keyState.clientRandom, keyState.serverRandom,
+                                    keyState.suite);
+                        if (result != SSL_SUCCESS) {
+                            wolfSSL_free(newSsl);
+                            error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
+                            KS_PRINTF("Couldn't set the session secret\n");
+#endif
+                        }
+
+                        memset(&keyState, 0, sizeof(keyState));
+                    }
+
+
+                    if (!error) {
+                        if (prevSsl != NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+                            KS_PRINTF("Releasing old session.\n");
+#endif
+                            wolfSSL_free(prevSsl);
+                        }
+                        prevSsl = curSsl;
+                        curSsl = newSsl;
+                        epoch = newEpoch;
+                        newSsl = NULL;
+                    }
+                }
+                else {
+#if WOLFCAST_LOGGING_LEVEL >= 2
+                    KS_PRINTF("Missed a key change.\n");
+#endif
+                    gGetNewKey = 1;
                 }
             }
         }

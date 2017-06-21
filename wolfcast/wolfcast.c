@@ -306,6 +306,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
     #define GROUP_PORT 12345
 
 extern UINT gGetNewKey;
+extern UINT gSwitchKeys;
 
 static int
 NetxDtlsTxCallback(
@@ -966,7 +967,8 @@ WolfcastClient(SocketInfo_t *si,
                 ssl = prevSsl;
             else if (epoch > curEpoch) {
                 rekeyTrigger = 1;
-                gGetNewKey = 1;
+                /* We may have missed a new key update or a switch keys. */
+                gSwitchKeys = epoch;
             }
 
             if (ssl != NULL) {
