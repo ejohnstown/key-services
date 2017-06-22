@@ -73,6 +73,15 @@ unsigned int LowResTimer(void)
     #define OTHER_CLIENT_ID 6
 #endif
 
+#ifndef WOLFLOCAL_KEY_SWITCH_TIME
+    #define WOLFLOCAL_KEY_SWITCH_TIME 15
+#endif
+#ifndef WOLFLOCAL_KEY_CHANGE_PERIOD
+    #define WOLFLOCAL_KEY_CHANGE_PERIOD 60
+#endif
+#ifndef WOLFLOCAL_TIMER_HOLDOFF
+    #define WOLFLOCAL_TIMER_HOLDOFF 20
+#endif
 
 /* Note: Return codes for wolfSSL code are of type int and typically
  * named "result". Return codes for ThreadX/NetX are of type UINT
@@ -108,6 +117,7 @@ static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
 static WOLFSSL* gCurSsl = NULL;
 static UINT gRekeyPending = 0;
+static UINT gSwitchKeyCount = 0;
 
 extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
@@ -138,18 +148,15 @@ static int isNetworkReady(ULONG timeout)
 static void
 keyServerCb(CmdPacket_t* pkt)
 {
-    if (pkt) {
-        if (pkt->header.type == CMD_PKT_TYPE_KEY_REQ) {
-            if (!gRekeyPending &&
-                wolfSSL_mcast_peer_known(gCurSsl, pkt->header.id)) {
+    if (pkt &&
+        (pkt->header.type == CMD_PKT_TYPE_KEY_NEW ||
+         (pkt->header.type == CMD_PKT_TYPE_KEY_REQ &&
+          !gRekeyPending &&
+          wolfSSL_mcast_peer_known(gCurSsl, pkt->header.id)))) {
 
-                pkt->header.type = CMD_PKT_TYPE_KEY_NEW;
-            }
-        }
-
-        if (pkt->header.type == CMD_PKT_TYPE_KEY_NEW) {
-            KeyServer_GenNewKey(gHeapHint);
-        }
+        gRekeyPending = 1;
+        gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
+        KeyServer_GenNewKey(gHeapHint);
     }
 }
 
@@ -667,15 +674,15 @@ void WolfLocalTimer(void)
 
 #ifdef WOLFLOCAL_TEST_KEY_SERVER
 
-    /* Give it a 15 count before trying to do anything. */
-    if (count > 15) {
+    /* Give it a X count before trying to do anything. */
+    if (count > WOLFLOCAL_TIMER_HOLDOFF) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
-        /* Every 10 seconds on the 10, generate new key. */
-        if ((count % 10) == 0) {
+        /* Every X seconds on the 0, generate new key. */
+        if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0 && !gRekeyPending) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
-            KS_PRINTF("timer: 10 on the 10\n");
+            KS_PRINTF("timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
 #endif
             ret = KeyServer_GenNewKey(gHeapHint);
             if (ret) {
@@ -689,31 +696,36 @@ void WolfLocalTimer(void)
                 if (status == TX_SUCCESS) {
                     gGetNewKey = 1;
                     gRekeyPending = 1;
+                    gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
                     tx_mutex_put(&gKeyStateMutex);
                 }
             }
         }
 
-        /* Every 10 seconds on the 2, announce new key change. */
-        if ((count % 10) == 2) {
+        /* If the switch key count is set, decrement it. If it becomes 0,
+         * switch the keys. */
+        if (gSwitchKeyCount) {
+            gSwitchKeyCount--;
+            if (gSwitchKeyCount == 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
-            KS_PRINTF("timer: 10 on the 2\n");
+                KS_PRINTF("timer: 10 on the 2\n");
 #endif
-            if (KeyServer_IsRunning()) {
-                ret = KeyServer_NewKeyUse(gHeapHint);
-                if (ret) {
+                if (KeyServer_IsRunning()) {
+                    ret = KeyServer_NewKeyUse(gHeapHint);
+                    if (ret) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
-                    KS_PRINTF("Failed to announce key switch.\n");
+                        KS_PRINTF("Failed to announce key switch.\n");
 #endif
-                }
-                else {
-                    status = tx_mutex_get(&gKeyStateMutex,
-                                          KS_TIMEOUT_KEY_STATE_WRITE);
-                    if (status == TX_SUCCESS) {
-                        gSwitchKeys = gKeyServerEpoch;
-                        /* Should be an epoch number */
-                        gRekeyPending = 0;
-                        tx_mutex_put(&gKeyStateMutex);
+                    }
+                    else {
+                        status = tx_mutex_get(&gKeyStateMutex,
+                                              KS_TIMEOUT_KEY_STATE_WRITE);
+                        if (status == TX_SUCCESS) {
+                            gSwitchKeys = gKeyServerEpoch;
+                            /* Should be an epoch number */
+                            gRekeyPending = 0;
+                            tx_mutex_put(&gKeyStateMutex);
+                        }
                     }
                 }
             }
@@ -724,13 +736,13 @@ void WolfLocalTimer(void)
 
 #ifdef WOLFLOCAL_TEST_KEY_REQUEST
 
-    /* Give it a 15 count before trying to do anything. */
-    if (count > 15) {
+    /* Give it a X count before trying to do anything. */
+    if (count > WOLFLOCAL_TIMER_HOLDOFF) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
-        /* Every 10 seconds on the 10, request new key. */
-        if ((count % 10) == 0) {
+        /* Every X seconds on the 0, request new key. */
+        if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: 10 on the 10\n");
 #endif
