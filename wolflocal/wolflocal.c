@@ -211,6 +211,7 @@ static void
 broadcastCb(CmdPacket_t* pkt)
 {
     unsigned char* msg;
+    unsigned short epoch;
 
     if (KeyServer_IsRunning()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
@@ -230,7 +231,10 @@ broadcastCb(CmdPacket_t* pkt)
             case CMD_PKT_TYPE_KEY_USE:
                 /* switch to new key */
                 msg = pkt->msg.epochResp.epoch;
-                gSwitchKeys = (msg[0] << 8) | msg[1];
+                epoch = (msg[0] << 8) | msg[1];
+                if (epoch != gKeyServerEpoch) {
+                    gSwitchKeys = epoch;
+                }
                 break;
         }
     }
@@ -471,18 +475,18 @@ WolfCastClientEntry(ULONG ignore)
     while (1) {
         if (!error) {
             if (!keySet && !switchKeys) {
-            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
-            if (status == TX_SUCCESS) {
-                keySet = gKeySet;
-                gKeySet = 0;
-                switchKeys = gSwitchKeys;
-                gSwitchKeys = 0;
+                status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
+                if (status == TX_SUCCESS) {
+                    keySet = gKeySet;
+                    gKeySet = 0;
+                    switchKeys = gSwitchKeys;
+                    gSwitchKeys = 0;
 
-                if (keySet) {
-                    memcpy(&keyState, &gKeyState, sizeof(keyState));
+                    if (keySet) {
+                        memcpy(&keyState, &gKeyState, sizeof(keyState));
+                    }
+                    status = tx_mutex_put(&gKeyStateMutex);
                 }
-                status = tx_mutex_put(&gKeyStateMutex);
-            }
             }
 
             if (status == TX_SUCCESS && keySet) {
@@ -497,7 +501,7 @@ WolfCastClientEntry(ULONG ignore)
             }
 
             if (switchKeys) {
-                if (switchKeys == newEpoch) {
+                if (switchKeys == newEpoch && switchKeys != epoch) {
                     WOLFSSL *newSsl = NULL;
 
                     if (!error) {
