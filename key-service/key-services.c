@@ -31,7 +31,7 @@ static int            gRespPktLen[CMD_PKT_TYPE_COUNT];
 static volatile int   gKeyServerInitDone = 0;
 static int            gKeyServerRunning = 0;
 static int            gKeyServerStop = 0;
-static unsigned short gKeyServerEpoch;
+       unsigned short gKeyServerEpoch;
 static struct in_addr gBcastAddr;
 
 #ifdef WOLFSSL_STATIC_MEMORY

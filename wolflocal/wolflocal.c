@@ -108,6 +108,7 @@ static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
 
 extern NX_IP* nxIp;
+extern unsigned short gKeyServerEpoch;
 
 
 static int isNetworkReady(ULONG timeout)
@@ -186,22 +187,27 @@ KeyServerEntry(ULONG ignore)
 static void
 broadcastCb(CmdPacket_t* pkt)
 {
-    if (pkt) {
+    unsigned char* msg;
+
+    if (KeyServer_IsRunning()) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+        KS_PRINTF("I am the key server, I should ignore my broadcasts.\n");
+#endif
+        return;
+    }
+
+    if (pkt != NULL) {
         switch (pkt->header.type) {
             case CMD_PKT_TYPE_KEY_CHG:
-                {
-                    /* trigger key change */
-                    unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
-                    XMEMCPY(&gKeySrvAddr.s_addr, addr,
-                            sizeof(gKeySrvAddr.s_addr));
-                    gGetNewKey = 1;
-                }
+                /* trigger key change */
+                msg = pkt->msg.keyChgResp.ipaddr;
+                XMEMCPY(&gKeySrvAddr.s_addr, msg, sizeof(gKeySrvAddr.s_addr));
+                gGetNewKey = 1;
                 break;
             case CMD_PKT_TYPE_KEY_USE:
-                {
-                    unsigned char* epoch = pkt->msg.epochResp.epoch;
-                    gSwitchKeys = (epoch[0] << 8) | epoch[1];
-                }
+                /* switch to new key */
+                msg = pkt->msg.epochResp.epoch;
+                gSwitchKeys = (msg[0] << 8) | msg[1];
                 break;
         }
     }
@@ -673,7 +679,8 @@ void WolfLocalTimer(void)
                     status = tx_mutex_get(&gKeyStateMutex,
                                           KS_TIMEOUT_KEY_STATE_WRITE);
                     if (status == TX_SUCCESS) {
-                        gSwitchKeys = 1;
+                        gSwitchKeys = gKeyServerEpoch;
+                        /* Should be an epoch number */
                         tx_mutex_put(&gKeyStateMutex);
                     }
                 }
