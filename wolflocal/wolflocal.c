@@ -107,6 +107,7 @@ static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
 static WOLFSSL* gCurSsl = NULL;
+static UINT gRekeyPending = 0;
 
 extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
@@ -139,7 +140,9 @@ keyServerCb(CmdPacket_t* pkt)
 {
     if (pkt) {
         if (pkt->header.type == CMD_PKT_TYPE_KEY_REQ) {
-            if (wolfSSL_mcast_peer_known(gCurSsl, pkt->header.id)) {
+            if (!gRekeyPending &&
+                wolfSSL_mcast_peer_known(gCurSsl, pkt->header.id)) {
+
                 pkt->header.type = CMD_PKT_TYPE_KEY_NEW;
             }
         }
@@ -681,6 +684,7 @@ void WolfLocalTimer(void)
                                       KS_TIMEOUT_KEY_STATE_WRITE);
                 if (status == TX_SUCCESS) {
                     gGetNewKey = 1;
+                    gRekeyPending = 1;
                     tx_mutex_put(&gKeyStateMutex);
                 }
             }
@@ -704,6 +708,7 @@ void WolfLocalTimer(void)
                     if (status == TX_SUCCESS) {
                         gSwitchKeys = gKeyServerEpoch;
                         /* Should be an epoch number */
+                        gRekeyPending = 0;
                         tx_mutex_put(&gKeyStateMutex);
                     }
                 }
