@@ -34,20 +34,11 @@ unsigned int LowResTimer(void)
  * threads used to demonstrate the DTLS Multicast. */
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
-#ifndef KEY_SERVICE_LOGGING_LEVEL
-    #define KEY_SERVICE_LOGGING_LEVEL 0
-#endif
-#ifndef WOLFCAST_LOGGING_LEVEL
-    #define WOLFCAST_LOGGING_LEVEL 0
-#endif
 #ifndef WOLFLOCAL_LOGGING_LEVEL
     #define WOLFLOCAL_LOGGING_LEVEL 0
 #endif
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 1 || \
-    WOLFCAST_LOGGING_LEVEL >= 1 || WOLFLOCAL_LOGGING_LEVEL >= 1
-    #define KS_PRINTF bsp_debug_printf
-#endif
+#define KS_PRINTF bsp_debug_printf
 
 #define KS_MEMORY_POOL_SZ 4096
 #define KS_STACK_SZ 4096
@@ -57,7 +48,7 @@ unsigned int LowResTimer(void)
 #define KS_TIMEOUT_1SEC 100
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_CLIENT KS_TIMEOUT_1SEC
-#define KS_TIMEOUT_WOLFCAST_KEY_POLL KS_TIMEOUT_1SEC
+#define KS_TIMEOUT_WOLFLOCAL_KEY_POLL KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_STATE_WRITE TX_WAIT_FOREVER
 #define KS_TIMEOUT_KEY_STATE_READ TX_NO_WAIT
@@ -173,19 +164,19 @@ KeyServerEntry(ULONG ignore)
     (void)ignore;
 
     if (wolfSSL_Init() != SSL_SUCCESS) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("KeyServer couldn't initialize wolfSSL.\n");
 #endif
     }
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Key server waiting for network.\n");
 #endif
     }
 
     while (gHeapHint == NULL) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("KeyServer waiting for heap.\n");
 #endif
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
@@ -193,7 +184,7 @@ KeyServerEntry(ULONG ignore)
 
     result = KeyServer_Init(gHeapHint);
     if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
 #endif
     }
@@ -201,7 +192,7 @@ KeyServerEntry(ULONG ignore)
     if (result == 0) {
         result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
             KS_PRINTF("KeyServer terminated. (%d)\n", result);
 #endif
         }
@@ -262,13 +253,13 @@ KeyBcastUdpEntry(ULONG ignore)
     (void)ignore;
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Key Service bcast udp server waiting for network.\n");
 #endif
     }
 
     while (gHeapHint == NULL) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("KeyBcast waiting for heap.\n");
 #endif
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
@@ -276,7 +267,7 @@ KeyBcastUdpEntry(ULONG ignore)
 
     result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
     if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("KeyBcastUdp terminated. (%d)\n", result);
 #endif
     }
@@ -302,20 +293,20 @@ KeyClientEntry(ULONG ignore)
 
     result = wolfSSL_Init();
     if (result != SSL_SUCCESS) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("KeyClient couldn't initialize wolfSSL. (%d)\n", result);
 #endif
         return;
     }
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("Key Service client waiting for network.\n");
 #endif
     }
 
     while (gHeapHint == NULL) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("KeyClient waiting for heap.\n");
 #endif
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
@@ -334,7 +325,7 @@ KeyClientEntry(ULONG ignore)
                 tx_mutex_put(&gKeyStateMutex);
             }
             else {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
                 KS_PRINTF("Couldn't get key state mutex to read\n");
 #endif
             }
@@ -343,7 +334,7 @@ KeyClientEntry(ULONG ignore)
         if (findMaster) {
             result = KeyClient_FindMaster(&gKeySrvAddr, gHeapHint);
             if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
 #endif
             }
@@ -356,13 +347,13 @@ KeyClientEntry(ULONG ignore)
             EpochRespPacket_t epochResp;
             result = KeyClient_NewKeyRequest(&gKeySrvAddr, &epochResp, gHeapHint);
             if (result) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
                 KS_PRINTF("Failed to request new key.\n");
 #endif
             }
             else {
                 requestRekey = 0;
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
                 KS_PRINTF("New epoch will be %u.\n",
                           ((epochResp.epoch[0] << 8) | epochResp.epoch[1]));
 #endif
@@ -370,12 +361,12 @@ KeyClientEntry(ULONG ignore)
         }
 
         if (!findMaster && getNewKey && !storeKey) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("Key client getting key.\n");
 #endif
             result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, gHeapHint);
             if (result != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
                 KS_PRINTF("Unable to retrieve key\n");
 #endif
             }
@@ -388,7 +379,7 @@ KeyClientEntry(ULONG ignore)
         if (storeKey) {
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
             if (status == TX_SUCCESS) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key client got key\n");
 #endif
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
@@ -397,7 +388,7 @@ KeyClientEntry(ULONG ignore)
                 tx_mutex_put(&gKeyStateMutex);
             }
             else {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
                 KS_PRINTF("Couldn't get key state mutex to write\n");
 #endif
             }
@@ -436,13 +427,13 @@ WolfCastClientEntry(ULONG ignore)
     (void)ignore;
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("wolfCast thread waiting for network.\n");
 #endif
     }
 
     while (gHeapHint == NULL) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("WolfCast waiting for heap.\n");
 #endif
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
@@ -456,21 +447,21 @@ WolfCastClientEntry(ULONG ignore)
     if (!error) {
         keySet = 0;
         while (!keySet) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("wolfCast thread waiting for first key.\n");
 #endif
-            tx_thread_sleep(KS_TIMEOUT_WOLFCAST_KEY_POLL);
+            tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
 
             status = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
             if (status == TX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("wolfCast getting key set flag\n");
 #endif
                 keySet = gKeySet;
                 status = tx_mutex_put(&gKeyStateMutex);
             }
             else {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Couldn't get key mutex. Trying again.\n");
 #endif
             }
@@ -500,7 +491,7 @@ WolfCastClientEntry(ULONG ignore)
                 keySet = 0;
                 newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
 
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
                 if (error) {
                     KS_PRINTF("Couldn't create new session\n");
                 }
@@ -530,7 +521,7 @@ WolfCastClientEntry(ULONG ignore)
                         if (result != SSL_SUCCESS) {
                             wolfSSL_free(newSsl);
                             error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
                             KS_PRINTF("Couldn't set the session secret\n");
 #endif
                         }
@@ -541,7 +532,7 @@ WolfCastClientEntry(ULONG ignore)
 
                     if (!error) {
                         if (prevSsl != NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
                             KS_PRINTF("Releasing old session.\n");
 #endif
                             wolfSSL_free(prevSsl);
@@ -560,7 +551,7 @@ WolfCastClientEntry(ULONG ignore)
 #endif
                 }
                 else {
-#if WOLFCAST_LOGGING_LEVEL >= 2
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
                     KS_PRINTF("Missed a key change.\n");
 #endif
                     gGetNewKey = 1;
@@ -613,7 +604,7 @@ WolfLocalInit(void)
                                  gKeyServiceMemory, sizeof(gKeyServiceMemory),
                                  WOLFMEM_GENERAL, 1);
     if (status != 0) {
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("WolfLocalInit couldn't get memory pool. (%d)\n", status);
 #endif
     }
@@ -689,17 +680,17 @@ void WolfLocalTimer(void)
 
     /* Give it a X count before trying to do anything. */
     if (count > WOLFLOCAL_TIMER_HOLDOFF) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
         /* Every X seconds on the 0, generate new key. */
         if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0 && !gRekeyPending) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
 #endif
             ret = KeyServer_GenNewKey(gHeapHint);
             if (ret) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
                 KS_PRINTF("Failed to announce new key.\n");
 #endif
             }
@@ -720,13 +711,13 @@ void WolfLocalTimer(void)
         if (gSwitchKeyCount) {
             gSwitchKeyCount--;
             if (gSwitchKeyCount == 0) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("timer: 10 on the 2\n");
 #endif
                 if (KeyServer_IsRunning()) {
                     ret = KeyServer_NewKeyUse(gHeapHint);
                     if (ret) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
                         KS_PRINTF("Failed to announce key switch.\n");
 #endif
                     }
@@ -751,12 +742,12 @@ void WolfLocalTimer(void)
 
     /* Give it a X count before trying to do anything. */
     if (count > WOLFLOCAL_TIMER_HOLDOFF) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
         /* Every X seconds on the 0, request new key. */
         if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: 10 on the 10\n");
 #endif
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
