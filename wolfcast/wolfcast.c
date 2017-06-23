@@ -287,7 +287,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     static unsigned int WCTIME(void)
     {
-        return (unsigned int)bsp_fast_timer_uptime() / 1000000;
+        return (unsigned int)(bsp_fast_timer_uptime() / 1000000);
     }
 
 #if WOLFCAST_LOGGING_LEVEL >= 3
