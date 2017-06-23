@@ -508,7 +508,11 @@ WolfCastClientEntry(ULONG ignore)
             }
 
             if (switchKeys) {
-                if (switchKeys == newEpoch && switchKeys != epoch) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+                KS_PRINTF("switchKeys = %u, newEpoch = %u, epoch = %u\n",
+                        switchKeys, newEpoch, epoch);
+#endif
+                if (switchKeys == newEpoch && newEpoch != epoch) {
                     WOLFSSL *newSsl = NULL;
 
                     if (!error) {
@@ -548,12 +552,21 @@ WolfCastClientEntry(ULONG ignore)
                         newSsl = NULL;
                     }
                 }
+                else if (switchKeys == epoch) {
+                    /* Happens when a client rejoins, the master rekeys,
+                     * and sends out the rekey messages for the peers. */
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+                    KS_PRINTF("Spurious key switch, ignoring.\n");
+#endif
+                }
                 else {
 #if WOLFCAST_LOGGING_LEVEL >= 2
                     KS_PRINTF("Missed a key change.\n");
 #endif
                     gGetNewKey = 1;
                 }
+
+                switchKeys = 0;
             }
         }
 
