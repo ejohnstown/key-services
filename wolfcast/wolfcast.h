@@ -9,6 +9,7 @@
     typedef struct SocketInfo_t {
         int txFd;
         int rxFd;
+        unsigned short groupPort;
         struct sockaddr_in tx;
         unsigned int txSz;
         unsigned char *rxPacket;
@@ -28,12 +29,13 @@
         NX_UDP_SOCKET txSocket;
         NX_UDP_SOCKET rxSocket;
         ULONG ipAddr;
-        UINT port;
+        UINT groupPort;
         NX_PACKET *rxPacket;
     } SocketInfo_t;
 #endif
 
-int WolfcastInit(int, unsigned short, WOLFSSL_CTX **, SocketInfo_t *);
+int WolfcastInit(int, unsigned short, unsigned short,
+                 WOLFSSL_CTX **, SocketInfo_t *, unsigned char*, unsigned int);
 int WolfcastSessionNew(WOLFSSL **, WOLFSSL_CTX *, SocketInfo_t *, int,
                    const unsigned short *, unsigned int);
 int WolfcastClientInit(unsigned int *, unsigned int *);

@@ -74,18 +74,34 @@ unsigned int LowResTimer(void)
     #define WOLFLOCAL_TIMER_HOLDOFF 20
 #endif
 
+#ifndef GROUP_PORT
+    #define GROUP_PORT 12345
+#endif
+#ifndef GROUP_ADDR
+    #define GROUP_ADDR 0xE2000003
+#endif
+
 /* Note: Return codes for wolfSSL code are of type int and typically
  * named "result". Return codes for ThreadX/NetX are of type UINT
  * and typically named "status". */
 
 static TX_THREAD gKeyBcastUdpThread;
 static TX_THREAD gKeyClientThread;
-static TX_THREAD gWolfCastClientThread;
+static TX_THREAD gWolfCastClientThread[3];
 
 static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
-static char gWolfCastClientStack[KS_STACK_SZ];
+static char gWolfCastClientStack[3][KS_STACK_SZ];
 static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
+
+#ifdef WOLFSSL_STATIC_MEMORY
+    #if defined(NETX) && defined(PGB002)
+        #define MEMORY_SECTION LINK_SECTION(data_sdram)
+    #else
+        #define MEMORY_SECTION
+    #endif
+    MEMORY_SECTION unsigned char gWolfCastMemory[3][WOLFLOCAL_STATIC_MEMORY_SZ];
+#endif
 
 #ifdef WOLFLOCAL_TEST_KEY_SERVER
     static TX_THREAD gKeyServerThread;
@@ -98,15 +114,15 @@ static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
  * wolfCast client will set a semaphore to for the Key
  * Client to request a new key. */
 static TX_MUTEX gKeyStateMutex;
-static UINT gKeySet = 0;
+static UINT gKeySet[3] = { 0, 0, 0 };
 UINT gGetNewKey = 1;
 UINT gRequestRekey = 0;
 static UINT gFindMaster = 1;
-UINT gSwitchKeys = 1;
+UINT gSwitchKeys[3] = { 1, 1, 1 };
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
-static WOLFSSL* gCurSsl = NULL;
+static WOLFSSL* gCurSsl[3] = { NULL, NULL, NULL };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
 
@@ -143,7 +159,9 @@ keyServerCb(CmdPacket_t* pkt)
         (pkt->header.type == CMD_PKT_TYPE_KEY_NEW ||
          (pkt->header.type == CMD_PKT_TYPE_KEY_REQ &&
           !gRekeyPending &&
-          wolfSSL_mcast_peer_known(gCurSsl, pkt->header.id)))) {
+          (wolfSSL_mcast_peer_known(gCurSsl[0], pkt->header.id) ||
+           wolfSSL_mcast_peer_known(gCurSsl[1], pkt->header.id) ||
+           wolfSSL_mcast_peer_known(gCurSsl[2], pkt->header.id))))) {
 
         gRekeyPending = 1;
         gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
@@ -231,7 +249,9 @@ broadcastCb(CmdPacket_t* pkt)
                 msg = pkt->msg.epochResp.epoch;
                 epoch = (msg[0] << 8) | msg[1];
                 if (epoch != gKeyServerEpoch) {
-                    gSwitchKeys = epoch;
+                    gSwitchKeys[0] = epoch;
+                    gSwitchKeys[1] = epoch;
+                    gSwitchKeys[2] = epoch;
                 }
                 break;
         }
@@ -383,7 +403,9 @@ KeyClientEntry(ULONG ignore)
                 KS_PRINTF("Key client got key\n");
 #endif
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
-                gKeySet = 1;
+                gKeySet[0] = 1;
+                gKeySet[1] = 1;
+                gKeySet[2] = 1;
                 storeKey = 0;
                 tx_mutex_put(&gKeyStateMutex);
             }
@@ -406,7 +428,7 @@ KeyClientEntry(ULONG ignore)
  * now local variables. It will wait for the flag for the key
  * getting set to go true before starting to broadcast. */
 static void
-WolfCastClientEntry(ULONG ignore)
+WolfCastClientEntry(ULONG streamId)
 {
     SocketInfo_t socketInfo; /* Used in the WOLFSSL object. */
     WOLFSSL_CTX *ctx = NULL; /* Used in the WOLFSSL object. */
@@ -419,16 +441,17 @@ WolfCastClientEntry(ULONG ignore)
     int result;
     UINT status;
     KeyRespPacket_t keyState;
-    UINT keySet = 0;
+    /* keySet is tagged volatile because of a bug I can't find. You can print
+     * it, and it is 0. It fails the if (!keySet) check, and if you print it
+     * it is still 0. */
+    volatile UINT keySet = 0;
     UINT switchKeys = 0;
     const unsigned short peerIdList[] =
                             { SERVER_ID, OTHER_CLIENT_ID, FOREIGN_CLIENT_ID };
 
-    (void)ignore;
-
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("wolfCast thread waiting for network.\n");
+        KS_PRINTF("wolfCast thread %u waiting for network.\n", streamId);
 #endif
     }
 
@@ -439,7 +462,11 @@ WolfCastClientEntry(ULONG ignore)
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
-    error = WolfcastInit(1, CLIENT_ID, &ctx, &socketInfo);
+    error = WolfcastInit(1, CLIENT_ID,
+                         GROUP_PORT + streamId,
+                         &ctx, &socketInfo,
+                         gWolfCastMemory[streamId],
+                         sizeof(gWolfCastMemory[streamId]));
     if (!error) {
         error = WolfcastClientInit(&txTime, &txCount);
     }
@@ -457,7 +484,7 @@ WolfCastClientEntry(ULONG ignore)
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("wolfCast getting key set flag\n");
 #endif
-                keySet = gKeySet;
+                keySet = gKeySet[streamId];
                 status = tx_mutex_put(&gKeyStateMutex);
             }
             else {
@@ -466,7 +493,7 @@ WolfCastClientEntry(ULONG ignore)
 #endif
             }
         }
-        gSwitchKeys = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
+        gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
         keySet = 0;
     }
 
@@ -475,10 +502,10 @@ WolfCastClientEntry(ULONG ignore)
             if (!keySet && !switchKeys) {
                 status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
                 if (status == TX_SUCCESS) {
-                    keySet = gKeySet;
-                    gKeySet = 0;
-                    switchKeys = gSwitchKeys;
-                    gSwitchKeys = 0;
+                    keySet = gKeySet[streamId];
+                    gKeySet[streamId] = 0;
+                    switchKeys = gSwitchKeys[streamId];
+                    gSwitchKeys[streamId] = 0;
 
                     if (keySet) {
                         memcpy(&keyState, &gKeyState, sizeof(keyState));
@@ -516,7 +543,8 @@ WolfCastClientEntry(ULONG ignore)
                     if (!error) {
                         result = wolfSSL_set_secret(newSsl, newEpoch,
                                     keyState.pms, sizeof(keyState.pms),
-                                    keyState.clientRandom, keyState.serverRandom,
+                                    keyState.clientRandom[streamId],
+                                    keyState.serverRandom[streamId],
                                     keyState.suite);
                         if (result != SSL_SUCCESS) {
                             wolfSSL_free(newSsl);
@@ -537,8 +565,8 @@ WolfCastClientEntry(ULONG ignore)
 #endif
                             wolfSSL_free(prevSsl);
                         }
-                        prevSsl = gCurSsl;
-                        gCurSsl = newSsl;
+                        prevSsl = gCurSsl[streamId];
+                        gCurSsl[streamId] = newSsl;
                         epoch = newEpoch;
                         newSsl = NULL;
                     }
@@ -562,8 +590,8 @@ WolfCastClientEntry(ULONG ignore)
         }
 
         if (!error)
-            error = WolfcastClient(&socketInfo, gCurSsl, prevSsl, epoch,
-                                   CLIENT_ID, &txTime, &txCount);
+            error = WolfcastClient(&socketInfo, gCurSsl[streamId], prevSsl,
+                                   epoch, CLIENT_ID, &txTime, &txCount);
 
         tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
@@ -578,6 +606,7 @@ void
 WolfLocalInit(void)
 {
     UINT status;
+    int i;
 
     wolfcrypt_test(NULL);
     benchmark_test(NULL);
@@ -649,16 +678,20 @@ WolfLocalInit(void)
         return;
     }
 
-    status = tx_thread_create(&gWolfCastClientThread, "wolfCast client",
-                           WolfCastClientEntry, 0,
-                           gWolfCastClientStack, sizeof(gWolfCastClientStack),
-                           KS_PRIORITY, KS_THRESHOLD,
-                           TX_NO_TIME_SLICE, TX_AUTO_START);
-    if (status != TX_SUCCESS) {
+    for (i = 0; i < 3; i++) {
+        status = tx_thread_create(&gWolfCastClientThread[i], "wolfCast client",
+                               WolfCastClientEntry, i,
+                               gWolfCastClientStack[i],
+                               sizeof(gWolfCastClientStack[i]),
+                               KS_PRIORITY, KS_THRESHOLD,
+                               TX_NO_TIME_SLICE, TX_AUTO_START);
+        if (status != TX_SUCCESS) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("wolfCast client thread create failed = 0x%02X\n", status);
+            KS_PRINTF("wolfCast client thread %u create failed = 0x%02X\n",
+                      i, status);
 #endif
-        return;
+            return;
+        }
     }
 
     return;
@@ -712,7 +745,7 @@ void WolfLocalTimer(void)
             gSwitchKeyCount--;
             if (gSwitchKeyCount == 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("timer: 10 on the 2\n");
+                KS_PRINTF("timer: 15 seconds later\n");
 #endif
                 if (KeyServer_IsRunning()) {
                     ret = KeyServer_NewKeyUse(gHeapHint);
@@ -725,7 +758,9 @@ void WolfLocalTimer(void)
                         status = tx_mutex_get(&gKeyStateMutex,
                                               KS_TIMEOUT_KEY_STATE_WRITE);
                         if (status == TX_SUCCESS) {
-                            gSwitchKeys = gKeyServerEpoch;
+                            gSwitchKeys[0] = gKeyServerEpoch;
+                            gSwitchKeys[1] = gKeyServerEpoch;
+                            gSwitchKeys[2] = gKeyServerEpoch;
                             /* Should be an epoch number */
                             gRekeyPending = 0;
                             tx_mutex_put(&gKeyStateMutex);
@@ -748,7 +783,7 @@ void WolfLocalTimer(void)
         /* Every X seconds on the 0, request new key. */
         if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("timer: 10 on the 10\n");
+            KS_PRINTF("timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
 #endif
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
             if (status == NX_SUCCESS) {

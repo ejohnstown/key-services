@@ -67,8 +67,8 @@ enum CmdPacketCommandType {
 typedef struct KeyRespPacket {
     unsigned char epoch[EPOCH_SIZE];
     unsigned char pms[PMS_SIZE];
-    unsigned char serverRandom[RAND_SIZE];
-    unsigned char clientRandom[RAND_SIZE];
+    unsigned char serverRandom[3][RAND_SIZE];
+    unsigned char clientRandom[3][RAND_SIZE];
     unsigned char suite[SUITE_SIZE];
 } WOLFSSL_PACK KeyRespPacket_t;
 

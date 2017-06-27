@@ -31,6 +31,7 @@
     #define WOLFCAST_LOGGING_LEVEL 0
 #endif
 
+extern unsigned char gPeerId;
 
 #ifndef NETX
 
@@ -68,7 +69,6 @@
 #endif
 
     #define GROUP_ADDR "226.0.0.3"
-    #define GROUP_PORT 12345
 
     #ifndef LOCAL_ADDR
         #error Please define LOCAL_ADDR with IP in dot notation
@@ -139,7 +139,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
     if (!error) {
         si->tx.sin_family = AF_INET;
         si->tx.sin_addr.s_addr = inet_addr(GROUP_ADDR);
-        si->tx.sin_port = htons(GROUP_PORT);
+        si->tx.sin_port = htons(si->groupPort);
         si->txSz = sizeof(si->tx);
 
         si->txFd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -238,7 +238,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
         memset(&rxAddr, 0, sizeof(rxAddr));
         rxAddr.sin_family = AF_INET;
         rxAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        rxAddr.sin_port = htons(GROUP_PORT);
+        rxAddr.sin_port = htons(si->groupPort);
 
         if (bind(si->rxFd,
                  (struct sockaddr*)&rxAddr, sizeof(rxAddr)) != 0) {
@@ -303,11 +303,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
 #endif
 
     #define GROUP_ADDR 0xE2000003
-    #define GROUP_PORT 12345
 
 extern UINT gGetNewKey;
-extern UINT gSwitchKeys;
-extern unsigned char gPeerId;
+extern UINT gSwitchKeys[3];
 
 static int
 NetxDtlsTxCallback(
@@ -352,7 +350,7 @@ NetxDtlsTxCallback(
 
     if (!error) {
         ret = nx_udp_socket_send(&si->txSocket, pkt,
-                                 si->ipAddr, si->port);
+                                 si->ipAddr, si->groupPort);
         if (ret != NX_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -480,7 +478,6 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     if (!error) {
         si->ipAddr = GROUP_ADDR;
-        si->port = GROUP_PORT;
 #ifdef PGB000
         si->ip = &bsp_ip_system_bus;
         si->pool = &bsp_pool_system_bus;
@@ -569,7 +566,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
     }
 
     if (!error) {
-        ret = nx_udp_socket_bind(&si->rxSocket, GROUP_PORT, NX_NO_WAIT);
+        ret = nx_udp_socket_bind(&si->rxSocket, si->groupPort, NX_NO_WAIT);
         if (ret != NX_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -618,16 +615,6 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
 
 
 #define MSG_SIZE 80
-
-
-#ifdef WOLFSSL_STATIC_MEMORY
-    #if defined(NETX) && defined(PGB002)
-        #define MEMORY_SECTION LINK_SECTION(data_sdram)
-    #else
-        #define MEMORY_SECTION
-    #endif
-    MEMORY_SECTION unsigned char memory[WOLFLOCAL_STATIC_MEMORY_SZ];
-#endif
 
 
 /* WolfcastSessionNew
@@ -744,8 +731,11 @@ int
 WolfcastInit(
         int isClient,
         unsigned short myId,
+        unsigned short groupPort,
         WOLFSSL_CTX **ctx,
-        SocketInfo_t *si)
+        SocketInfo_t *si,
+        unsigned char* heap,
+        unsigned int heapSz)
 {
     int ret, error = 0;
 
@@ -781,6 +771,7 @@ WolfcastInit(
     }
 
     if (!error) {
+        si->groupPort = groupPort;
         error = CreateSockets(si, isClient);
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -823,7 +814,7 @@ WolfcastInit(
         if (method != NULL) {
             ret = wolfSSL_CTX_load_static_memory(
                     ctx, method,
-                    memory, sizeof(memory), 0, 2);
+                    heap, heapSz, 0, 2);
 
             if (ret != SSL_SUCCESS) {
                 error = 1;
@@ -969,7 +960,9 @@ WolfcastClient(SocketInfo_t *si,
             else if (epoch > curEpoch) {
                 rekeyTrigger = 1;
                 /* We may have missed a new key update or a switch keys. */
-                gSwitchKeys = epoch;
+                gSwitchKeys[0] = epoch;
+                gSwitchKeys[1] = epoch;
+                gSwitchKeys[2] = epoch;
             }
 
             if (ssl != NULL) {
@@ -1139,6 +1132,8 @@ WolfcastServer(WOLFSSL *ssl)
 static int keySwapTrigger = 1;
 
 #define PEER_ID_LIST_SZ 99
+#define GROUP_PORT 12345
+
 
     static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
     {
@@ -1191,7 +1186,7 @@ main(
     int error = 0;
     int ret;
     int isClient = 0;
-    unsigned short myId;
+    unsigned short myId = 0;
     unsigned short peerIdList[PEER_ID_LIST_SZ];
     unsigned int peerIdListSz = 0;
     SocketInfo_t si;
@@ -1201,6 +1196,11 @@ main(
     unsigned short epoch = 0;
     struct in_addr keySrvAddr;
     pthread_t tid;
+#ifdef WOLFSSL_STATIC_MEMORY
+    unsigned char memory[WOLFLOCAL_STATIC_MEMORY_SZ];
+#endif
+
+
 
     memset(&keySrvAddr, 0, sizeof(keySrvAddr));
 
@@ -1281,7 +1281,8 @@ main(
     gPeerId = myId;
 
     if (!error) {
-        error = WolfcastInit(isClient, myId, &ctx, &si);
+        error = WolfcastInit(isClient, myId, GROUP_PORT, &ctx, &si, memory,
+                sizeof(memory));
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("Couldn't initialize wolfCast.");
@@ -1388,8 +1389,8 @@ main(
                 if (!error) {
                     ret = wolfSSL_set_secret(newSsl, newEpoch,
                                              keyResp.pms, sizeof(keyResp.pms),
-                                             keyResp.clientRandom,
-                                             keyResp.serverRandom,
+                                             keyResp.clientRandom[0],
+                                             keyResp.serverRandom[0],
                                              keyResp.suite);
                     if (ret != SSL_SUCCESS) {
                         error = 1;
@@ -1485,7 +1486,8 @@ skipRekey:
                 newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
                 ret = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyResp.pms, sizeof(keyResp.pms),
-                                keyResp.clientRandom, keyResp.serverRandom,
+                                keyResp.clientRandom[0],
+                                keyResp.serverRandom[0],
                                 keyResp.suite);
                 if (ret != SSL_SUCCESS) {
                     error = 1;
