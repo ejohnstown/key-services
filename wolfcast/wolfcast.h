@@ -3,6 +3,7 @@
 
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
+#include "wolflocal.h"
 
 #ifndef NETX
     #include <arpa/inet.h>
@@ -39,9 +40,7 @@ int WolfcastInit(int, unsigned short, unsigned short,
 int WolfcastSessionNew(WOLFSSL **, WOLFSSL_CTX *, SocketInfo_t *, int,
                    const unsigned short *, unsigned int);
 int WolfcastClientInit(unsigned int *, unsigned int *);
-int WolfcastClient(SocketInfo_t *, WOLFSSL *, WOLFSSL *,
-                   unsigned short, unsigned short,
-                   unsigned int *, unsigned int *);
+int WolfcastClient(wolfWrapper_t*, unsigned int *, unsigned int *);
 int WolfcastServer(WOLFSSL *);
 
 #endif /* _WOLFCAST_H_ */

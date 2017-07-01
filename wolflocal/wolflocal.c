@@ -4,6 +4,7 @@
 #include "wolftest.h"
 #include "key-services.h"
 #include "wolfcast.h"
+#include <wolfssl/error-ssl.h>
 
 
 /* mySeed() and LowResTimer() are application defined functions
@@ -81,6 +82,13 @@ unsigned int LowResTimer(void)
     #define GROUP_ADDR 0xE2000003
 #endif
 
+
+#ifdef PGB000
+    #include "pgb000_com.h"
+#else /* PGB000:PGB002 */
+    #include "pgb002_ap2.h"
+#endif
+
 /* Note: Return codes for wolfSSL code are of type int and typically
  * named "result". Return codes for ThreadX/NetX are of type UINT
  * and typically named "status". */
@@ -122,9 +130,13 @@ UINT gSwitchKeys[3] = { 1, 1, 1 };
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
-static WOLFSSL* gCurSsl[3] = { NULL, NULL, NULL };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
+wolfWrapper_t gWrappers[3];
+
+const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID, OTHER_CLIENT_ID };
+#define PEER_ID_LIST_SZ (sizeof(gPeerIdList)/sizeof(gPeerIdList[0]))
+
 
 extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
@@ -159,9 +171,9 @@ keyServerCb(CmdPacket_t* pkt)
         (pkt->header.type == CMD_PKT_TYPE_KEY_NEW ||
          (pkt->header.type == CMD_PKT_TYPE_KEY_REQ &&
           !gRekeyPending &&
-          (wolfSSL_mcast_peer_known(gCurSsl[0], pkt->header.id) ||
-           wolfSSL_mcast_peer_known(gCurSsl[1], pkt->header.id) ||
-           wolfSSL_mcast_peer_known(gCurSsl[2], pkt->header.id))))) {
+          (wolfSSL_mcast_peer_known(gWrappers[0].curSsl, pkt->header.id) ||
+           wolfSSL_mcast_peer_known(gWrappers[1].curSsl, pkt->header.id) ||
+           wolfSSL_mcast_peer_known(gWrappers[2].curSsl, pkt->header.id))))) {
 
         gRekeyPending = 1;
         gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
@@ -430,24 +442,10 @@ KeyClientEntry(ULONG ignore)
 static void
 WolfCastClientEntry(ULONG streamId)
 {
-    SocketInfo_t socketInfo; /* Used in the WOLFSSL object. */
-    WOLFSSL_CTX *ctx = NULL; /* Used in the WOLFSSL object. */
-    WOLFSSL *prevSsl = NULL;
-    unsigned short epoch = 0;
-    unsigned short newEpoch;
+    wolfWrapper_t* wrapper;
     unsigned int txTime;
     unsigned int txCount;
     int error;
-    int result;
-    UINT status;
-    KeyRespPacket_t keyState;
-    /* keySet is tagged volatile because of a bug I can't find. You can print
-     * it, and it is 0. It fails the if (!keySet) check, and if you print it
-     * it is still 0. */
-    volatile UINT keySet = 0;
-    UINT switchKeys = 0;
-    const unsigned short peerIdList[] =
-                            { SERVER_ID, OTHER_CLIENT_ID, FOREIGN_CLIENT_ID };
 
     while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
@@ -455,146 +453,28 @@ WolfCastClientEntry(ULONG streamId)
 #endif
     }
 
-    while (gHeapHint == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("WolfCast waiting for heap.\n");
-#endif
-        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
-    }
+    wrapper = &gWrappers[streamId];
 
-    error = WolfcastInit(1, CLIENT_ID,
-                         GROUP_PORT + streamId,
-                         &ctx, &socketInfo,
-                         gWolfCastMemory[streamId],
-                         sizeof(gWolfCastMemory[streamId]));
-    if (!error) {
+    error = wolfWrapper_Init(wrapper, streamId, gPeerId,
+                             GROUP_PORT + streamId, GROUP_ADDR,
+                             gPeerIdList, PEER_ID_LIST_SZ,
+                             gWolfCastMemory[streamId],
+                             sizeof(gWolfCastMemory[streamId]));
+
+    if (!error)
         error = WolfcastClientInit(&txTime, &txCount);
-    }
 
-    if (!error) {
-        keySet = 0;
-        while (!keySet) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("wolfCast thread waiting for first key.\n");
-#endif
-            tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
-
-            status = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
-            if (status == TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("wolfCast getting key set flag\n");
-#endif
-                keySet = gKeySet[streamId];
-                status = tx_mutex_put(&gKeyStateMutex);
-            }
-            else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("Couldn't get key mutex. Trying again.\n");
-#endif
-            }
-        }
-        gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
-        keySet = 0;
-    }
-
-    while (1) {
-        if (!error) {
-            if (!keySet && !switchKeys) {
-                status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
-                if (status == TX_SUCCESS) {
-                    keySet = gKeySet[streamId];
-                    gKeySet[streamId] = 0;
-                    switchKeys = gSwitchKeys[streamId];
-                    gSwitchKeys[streamId] = 0;
-
-                    if (keySet) {
-                        memcpy(&keyState, &gKeyState, sizeof(keyState));
-                    }
-                    status = tx_mutex_put(&gKeyStateMutex);
-                }
-            }
-
-            if (status == TX_SUCCESS && keySet) {
-                keySet = 0;
-                newEpoch = (keyState.epoch[0] << 8) | keyState.epoch[1];
-
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                if (error) {
-                    KS_PRINTF("Couldn't create new session\n");
-                }
-#endif
-            }
-
-            if (switchKeys) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("switchKeys = %u, newEpoch = %u, epoch = %u\n",
-                        switchKeys, newEpoch, epoch);
-#endif
-                if (switchKeys == newEpoch && newEpoch != epoch) {
-                    WOLFSSL *newSsl = NULL;
-
-                    if (!error) {
-                        switchKeys = 0;
-                        error = WolfcastSessionNew(&newSsl, ctx,
-                                      &socketInfo, 1,
-                                      peerIdList,
-                                      sizeof(peerIdList) / sizeof(peerIdList[0]));
-                    }
-                    if (!error) {
-                        result = wolfSSL_set_secret(newSsl, newEpoch,
-                                    keyState.pms, sizeof(keyState.pms),
-                                    keyState.clientRandom[streamId],
-                                    keyState.serverRandom[streamId],
-                                    keyState.suite);
-                        if (result != SSL_SUCCESS) {
-                            wolfSSL_free(newSsl);
-                            error = 1;
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                            KS_PRINTF("Couldn't set the session secret\n");
-#endif
-                        }
-
-                        memset(&keyState, 0, sizeof(keyState));
-                    }
-
-
-                    if (!error) {
-                        if (prevSsl != NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                            KS_PRINTF("Releasing old session.\n");
-#endif
-                            wolfSSL_free(prevSsl);
-                        }
-                        prevSsl = gCurSsl[streamId];
-                        gCurSsl[streamId] = newSsl;
-                        epoch = newEpoch;
-                        newSsl = NULL;
-                    }
-                }
-                else if (switchKeys == epoch) {
-                    /* Happens when a client rejoins, the master rekeys,
-                     * and sends out the rekey messages for the peers. */
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                    KS_PRINTF("Spurious key switch, ignoring.\n");
-#endif
-                }
-                else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-                    KS_PRINTF("Missed a key change.\n");
-#endif
-                    gGetNewKey = 1;
-                }
-
-                switchKeys = 0;
-            }
-        }
-
+    while (!error) {
+        error = wolfWrapper_Update(wrapper);
         if (!error)
-            error = WolfcastClient(&socketInfo, gCurSsl[streamId], prevSsl,
-                                   epoch, CLIENT_ID, &txTime, &txCount);
-
-        tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
+            error = WolfcastClient(wrapper, &txTime, &txCount);
+        if (!error)
+            tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
+
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+    KS_PRINTF("wolfCast thread %u ended.\n", streamId);
+#endif
 }
 
 
@@ -795,4 +675,582 @@ void WolfLocalTimer(void)
 
 #endif /* WOLFLOCAL_TEST_KEY_REQUEST */
 
+}
+
+
+static int
+NetxDtlsTxCallback(
+    WOLFSSL *ssl,
+    char *buf, int sz,
+    void* ctx)
+{
+    wolfWrapper_t* wrapper;
+    NX_PACKET *pkt = NULL;
+    UINT status;
+
+    (void)ssl;
+
+    if (ctx == NULL || buf == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("transmit callback invalid parameters\n");
+#endif
+        goto exit;
+    }
+    wrapper = (wolfWrapper_t*)ctx;
+
+    status = nx_packet_allocate(wrapper->pool, &pkt,
+                                NX_UDP_PACKET, NX_WAIT_FOREVER);
+    if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("couldn't allocate packet wrapper\n");
+#endif
+        goto exit;
+    }
+
+    status = nx_packet_data_append(pkt, buf, sz,
+                                   wrapper->pool, NX_WAIT_FOREVER);
+    if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("couldn't append data to packet\n");
+#endif
+        goto exit;
+    }
+
+    status = nx_udp_socket_send(&wrapper->realTxSocket, pkt,
+                                wrapper->groupAddr, wrapper->groupPort);
+    if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("tx error\n");
+#endif
+        goto exit;
+    }
+
+exit:
+    if (status != NX_SUCCESS) {
+        sz = WOLFSSL_CBIO_ERR_GENERAL;
+
+        /* In case of error, release packet. */
+        status = nx_packet_release(pkt);
+        if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            KS_PRINTF("couldn't release packet\n");
+#endif
+        }
+    }
+
+    return sz;
+}
+
+
+static int
+NetxDtlsRxCallback(
+    WOLFSSL *ssl,
+    char *buf, int sz,
+    void* ctx)
+{
+    wolfWrapper_t* wrapper;
+    NX_PACKET *pkt;
+    UINT status;
+    unsigned long rxSz;
+
+    (void)ssl;
+
+    if (ctx == NULL || buf == NULL || sz <= 0) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("receive callback invalid parameters\n");
+#endif
+        goto exit;
+    }
+
+    wrapper = (wolfWrapper_t*)ctx;
+    pkt = wrapper->rxPacket;
+    if (pkt == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("no packet\n");
+#endif
+        status = NX_NO_PACKET;
+        goto exit;
+    }
+
+    status = nx_packet_length_get(pkt, &rxSz);
+    if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("couldn't get packet length\n");
+#endif
+        goto exit;
+    }
+
+    if (rxSz > (unsigned long)sz) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("receive packet too large for buffer\n");
+#endif
+        goto exit;
+    }
+
+    status = nx_packet_data_retrieve(pkt, buf, &rxSz);
+    if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("couldn't retrieve packet\n");
+#endif
+        goto exit;
+    }
+
+exit:
+    if (status == NX_SUCCESS)
+        sz = (int)rxSz;
+    else if (status == NX_NO_PACKET)
+        sz = WOLFSSL_CBIO_ERR_WANT_READ;
+    else
+        sz = WOLFSSL_CBIO_ERR_GENERAL;
+
+    if (pkt != NULL) {
+        status = nx_packet_release(pkt);
+        if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            KS_PRINTF("couldn't release packet\n");
+#endif
+        }
+        else
+            wrapper->rxPacket = NULL;
+    }
+
+    return sz;
+}
+
+
+
+int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
+                     UCHAR myId, USHORT groupPort, ULONG groupAddr,
+                     const USHORT *peerIdList, UINT peerIdListSz,
+                     void* heap, UINT heapSz)
+{
+    int ret;
+    int keySet = 0;
+
+    if (wrapper == NULL || heap == NULL || heapSz == 0 ||
+        peerIdList == NULL || peerIdListSz == 0 ||
+        groupAddr == 0 || groupPort == 0) {
+
+        goto exit;
+    }
+
+    memset(wrapper, 0, sizeof(wolfWrapper_t));
+
+    wrapper->streamId = streamId;
+    wrapper->myId = myId;
+    wrapper->groupAddr = groupAddr;
+    wrapper->groupPort = groupPort;
+    wrapper->peerIdList = peerIdList;
+    wrapper->peerIdListSz = peerIdListSz;
+    wrapper->txSocket = (KS_SOCKET_T)&wrapper->realTxSocket;
+    wrapper->rxSocket = (KS_SOCKET_T)&wrapper->realRxSocket;
+#ifdef PGB000
+    wrapper->ip = &bsp_ip_system_bus;
+    wrapper->pool = &bsp_pool_system_bus;
+#else /* PGB000:PGB002 */
+    wrapper->ip = &bsp_ip_local_bus;
+    wrapper->pool = &bsp_pool_local_bus;
+#endif /* PGB002 */
+
+    ret = wolfSSL_Init();
+    if (ret != SSL_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("wolfWrapper_Init couldn't initialize wolfSSL\n");
+#endif
+        goto exit;
+    }
+
+    ret = wolfSSL_CTX_load_static_memory(&wrapper->ctx,
+                                         wolfDTLSv1_2_client_method_ex,
+                                         heap, heapSz, 0, 2);
+    if (ret != SSL_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("unable to load static memory and create ctx\n");
+#endif
+        goto exit;
+    }
+
+    wolfSSL_SetIOSend(wrapper->ctx, NetxDtlsTxCallback);
+    wolfSSL_SetIORecv(wrapper->ctx, NetxDtlsRxCallback);
+    ret = wolfSSL_CTX_mcast_set_member_id(wrapper->ctx, myId);
+    if (ret != SSL_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("set mcast member id error\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_udp_enable(wrapper->ip);
+    if (ret == NX_ALREADY_ENABLED) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+        KS_PRINTF("UDP already enabled\n");
+#endif
+    }
+    else if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("cannot enable UDP\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_igmp_enable(wrapper->ip);
+    if (ret == NX_ALREADY_ENABLED) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+        KS_PRINTF("IGMP already enabled\n");
+#endif
+    }
+    else if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("cannot enable IGMP\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_udp_socket_create(wrapper->ip, &wrapper->realTxSocket,
+                               "Multicast TX Socket",
+                               NX_IP_NORMAL, NX_DONT_FRAGMENT,
+                               NX_IP_TIME_TO_LIVE, 30);
+    if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("unable to create tx socket\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_udp_socket_bind(&wrapper->realTxSocket, NX_ANY_PORT, NX_NO_WAIT);
+    if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("tx bind failed\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_igmp_loopback_disable(wrapper->ip);
+
+    if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("couldn't disable multicast loopback\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_udp_socket_create(wrapper->ip, &wrapper->realRxSocket,
+                               "Multicast RX Socket",
+                               NX_IP_NORMAL, NX_DONT_FRAGMENT,
+                               NX_IP_TIME_TO_LIVE, 30);
+    if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("unable to create rx socket\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_udp_socket_bind(&wrapper->realRxSocket,
+                             wrapper->groupPort, NX_NO_WAIT);
+    if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("rx bind failed\n");
+#endif
+        goto exit;
+    }
+
+    ret = nx_igmp_multicast_join(wrapper->ip, wrapper->groupAddr);
+    if (ret != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("setsockopt mc add membership failed\n");
+#endif
+        goto exit;
+    }
+
+    /* Wait for the first key. */
+    while (!keySet) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+        KS_PRINTF("wolfCast thread waiting for first key.\n");
+#endif
+        tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
+
+        ret = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
+        if (ret == TX_SUCCESS) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+            KS_PRINTF("wolfCast getting key set flag\n");
+#endif
+            keySet = gKeySet[streamId];
+            ret = tx_mutex_put(&gKeyStateMutex);
+        }
+        else {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+            KS_PRINTF("Couldn't get key mutex. Trying again.\n");
+#endif
+        }
+    }
+    gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
+
+exit:
+    return ret;
+}
+
+
+static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
+{
+    int ret = SSL_SUCCESS;
+    UINT i;
+    WOLFSSL* newSsl = NULL;
+
+    if (wrapper == NULL || ssl == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("wolfWrapper_NewWrapper invalid parameters\n");
+#endif
+        goto exit;
+    }
+
+    newSsl = wolfSSL_new(wrapper->ctx);
+    if (newSsl == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("ssl new error\n");
+#endif
+        goto exit;
+    }
+
+    wolfSSL_SetIOWriteCtx(newSsl, wrapper);
+    wolfSSL_SetIOReadCtx(newSsl, wrapper);
+    wolfSSL_set_using_nonblock(newSsl, 1);
+
+    for (i = 0; i < wrapper->peerIdListSz; i++) {
+        ret = wolfSSL_mcast_peer_add(newSsl, wrapper->peerIdList[i], 0);
+        if (ret != SSL_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            KS_PRINTF("mcast add peer error\n");
+#endif
+            goto exit;
+        }
+    }
+    
+    *ssl = newSsl;
+    newSsl = NULL;
+
+exit:
+    if (newSsl)
+        wolfSSL_free(newSsl);
+
+    return (ret != SSL_SUCCESS);
+}
+
+
+int wolfWrapper_Update(wolfWrapper_t* wrapper)
+{
+    UINT status;
+    int error = 0;
+
+    if (wrapper == NULL) {
+        error = 1;
+        goto exit;
+    }
+
+    if (!wrapper->keySet && !wrapper->switchKeys) {
+        status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
+        if (status != TX_SUCCESS)
+            goto exit;
+
+        wrapper->keySet = gKeySet[wrapper->streamId];
+        gKeySet[wrapper->streamId] = 0;
+        wrapper->switchKeys = gSwitchKeys[wrapper->streamId];
+        gSwitchKeys[wrapper->streamId] = 0;
+
+        if (wrapper->keySet) {
+            memcpy(&wrapper->keyState, &gKeyState, sizeof(gKeyState));
+        }
+
+        status = tx_mutex_put(&gKeyStateMutex);
+        if (status != TX_SUCCESS) {
+            error = 1;
+            goto exit;
+        }
+    }
+
+    if (wrapper->keySet) {
+        wrapper->keySet = 0;
+        wrapper->newEpoch = (wrapper->keyState.epoch[0] << 8) |
+                            wrapper->keyState.epoch[1];
+    }
+
+    if (wrapper->switchKeys) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+        KS_PRINTF("switchKeys = %u, newEpoch = %u, epoch = %u\n",
+                wrapper->switchKeys, wrapper->newEpoch, wrapper->epoch);
+#endif
+        if (wrapper->switchKeys == wrapper->newEpoch &&
+            wrapper->newEpoch != wrapper->epoch) {
+
+            WOLFSSL *newSsl = NULL;
+
+            wrapper->switchKeys = 0;
+            status = wolfWrapper_NewSession(wrapper, &newSsl);
+            if (status != 0) {
+                error = 1;
+                goto exit;
+            }
+
+            status = wolfSSL_set_secret(newSsl, wrapper->newEpoch,
+                            wrapper->keyState.pms,
+                            sizeof(wrapper->keyState.pms),
+                            wrapper->keyState.clientRandom[wrapper->streamId],
+                            wrapper->keyState.serverRandom[wrapper->streamId],
+                            wrapper->keyState.suite);
+            if (status != SSL_SUCCESS) {
+                error = 1;
+                wolfSSL_free(newSsl);
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
+                KS_PRINTF("Couldn't set the session secret\n");
+#endif
+                goto exit;
+            }
+            memset(&wrapper->keyState, 0, sizeof(wrapper->keyState));
+
+            if (wrapper->prevSsl != NULL) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+                KS_PRINTF("Releasing old session.\n");
+#endif
+                wolfSSL_free(wrapper->prevSsl);
+            }
+            wrapper->prevSsl = wrapper->curSsl;
+            wrapper->curSsl = newSsl;
+            wrapper->epoch = wrapper->newEpoch;
+            newSsl = NULL;
+        }
+        else if (wrapper->switchKeys == wrapper->epoch) {
+            /* Happens when a client rejoins, the master rekeys,
+             * and sends out the rekey messages for the peers. */
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+            KS_PRINTF("Spurious key switch, ignoring.\n");
+#endif
+        }
+        else {
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
+            KS_PRINTF("Missed a key change.\n");
+#endif
+            gGetNewKey = 1;
+        }
+
+        wrapper->switchKeys = 0;
+    }
+
+exit:
+    return error;
+}
+
+
+typedef struct EpochPeek {
+    unsigned char pad[3];
+    unsigned char epoch[2];
+} EpochPeek;
+
+
+static unsigned short GetEpoch(NX_PACKET *packet)
+{
+    unsigned char buf[sizeof(EpochPeek)];
+    ULONG bytesCopied;
+    UINT status;
+    unsigned short epoch = 0;
+
+    status = nx_packet_data_extract_offset(packet, 0,
+                                           buf, sizeof(buf),
+                                           &bytesCopied);
+
+    if (status == NX_SUCCESS && bytesCopied == sizeof(buf)) {
+        EpochPeek *peek = (EpochPeek*)buf;
+
+        epoch = (peek->epoch[0] << 8) | peek->epoch[1];
+    }
+
+    return epoch;
+}
+
+
+int wolfWrapper_Write(wolfWrapper_t* wrapper, const void* buf, int sz)
+{
+    int sentSz = 0;
+/* If there isn't a curSsl, return want write? */
+    if (wrapper == NULL || buf == NULL || sz == 0)
+        goto exit;
+
+    sentSz = wolfSSL_write(wrapper->curSsl, buf, sz);
+    if (sentSz < 0) {
+        sentSz = wolfSSL_get_error(wrapper->curSsl, sentSz);
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        KS_PRINTF("wolfSSL error: %s\n",
+                  wolfSSL_ERR_reason_error_string(sentSz));
+#endif
+    }
+
+exit:
+    return sentSz;
+}
+
+
+int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
+                   void* buf, int sz)
+{
+    UINT status;
+    NX_PACKET *nxPacket = NULL;
+    WOLFSSL *ssl = NULL;
+    unsigned short epoch;
+    int recvSz = 0;
+
+    if (wrapper == NULL || buf == NULL || sz == 0)
+        goto exit;
+
+    status = nx_udp_socket_receive(&wrapper->realRxSocket,
+                                   &nxPacket, NX_NO_WAIT);
+    if (status != NX_SUCCESS)
+        goto exit;
+
+    wrapper->rxPacket = nxPacket;
+    epoch = GetEpoch(nxPacket);
+    if (epoch == wrapper->epoch)
+        ssl = wrapper->curSsl;
+    else if (epoch < wrapper->epoch)
+        ssl = wrapper->prevSsl;
+    else if (epoch > wrapper->epoch) {
+        /* We may have missed a new key update or a switch keys. */
+        gSwitchKeys[0] = epoch;
+        gSwitchKeys[1] = epoch;
+        gSwitchKeys[2] = epoch;
+    }
+
+    if (ssl == NULL) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+        KS_PRINTF("Ignoring message unknown Epoch.\n");
+#endif
+        goto exit;
+    }
+
+    recvSz = wolfSSL_mcast_read(ssl, peerId, buf, sz);
+    if (recvSz < 0) {
+        recvSz = wolfSSL_get_error(ssl, recvSz);
+        if (recvSz == VERIFY_MAC_ERROR || recvSz == DECRYPT_ERROR) {
+#if WOLFCAST_LOGGING_LEVEL >= 3
+            KS_PRINTF("Allowable DTLS error. Ignoring a message.\n");
+#endif
+        }
+        else if (recvSz != SSL_ERROR_WANT_READ) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            KS_PRINTF("wolfSSL error: %s\n",
+                      wolfSSL_ERR_reason_error_string(recvSz));
+#endif
+            goto exit;
+        }
+    }
+
+exit:
+    if (wrapper->rxPacket != NULL) {
+        status = nx_packet_release(wrapper->rxPacket);
+        if (status != NX_SUCCESS) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            KS_PRINTF("couldn't release packet\n");
+#endif
+        }
+        wrapper->rxPacket = NULL;
+    }
+
+    return recvSz;
 }

@@ -591,7 +591,10 @@ CreateSockets(SocketInfo_t* si, int isClient)
 #endif
 
 
+#ifndef NETX
 static int rekeyTrigger = 1;
+#endif
+
 const char seqHwCbCtx[] = "Callback context string.";
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
@@ -607,8 +610,6 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
     (void)curSeq;
     (void)ctx;
 #endif
-
-    /*rekeyTrigger = 1; */
 
     return 0;
 }
@@ -861,13 +862,16 @@ WolfcastInit(
 
 #ifndef NO_WOLFCAST_CLIENT
 
+
+#ifndef NETX
+
 typedef struct EpochPeek {
     unsigned char pad[3];
     unsigned char epoch[2];
 } EpochPeek;
 
 
-static unsigned short GetEpoch_ex(const byte *buf)
+static unsigned short GetEpoch(const byte *buf)
 {
     unsigned short epoch = 0;
 
@@ -879,28 +883,8 @@ static unsigned short GetEpoch_ex(const byte *buf)
     return epoch;
 }
 
+#endif /* !NETX */
 
-#ifdef NETX
-static unsigned short GetEpoch(NX_PACKET *packet)
-{
-    unsigned char buf[sizeof(EpochPeek)];
-    ULONG bytesCopied;
-    UINT status;
-    unsigned short epoch = 0;
-
-    status = nx_packet_data_extract_offset(packet, 0,
-                                           buf, sizeof(buf),
-                                           &bytesCopied);
-
-    if (status == NX_SUCCESS && bytesCopied == sizeof(buf)) {
-        epoch = GetEpoch_ex(buf);
-    }
-
-    return epoch;
-}
-#else
-#define GetEpoch GetEpoch_ex
-#endif
 
 static inline unsigned int
 WolfcastClientUpdateTimeout(unsigned int curTime)
@@ -924,15 +908,13 @@ WolfcastClientInit(unsigned int *txtime, unsigned int *count)
 
 
 int
-WolfcastClient(SocketInfo_t *si,
-               WOLFSSL *curSsl, WOLFSSL *prevSsl,
-               unsigned short curEpoch, unsigned short myId,
+WolfcastClient(wolfWrapper_t *wrapper,
                unsigned int *txtime, unsigned int *count)
 {
     int error = 0;
     char msg[MSG_SIZE];
 
-    if (curSsl == NULL || txtime == NULL || count == NULL) {
+    if (wrapper == NULL || txtime == NULL || count == NULL) {
         /* prevSsl is allowed to be NULL, and is checked later. */
         error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -940,71 +922,18 @@ WolfcastClient(SocketInfo_t *si,
 #endif
     }
 
-    if (!error) {
 #ifdef NETX
-        UINT status;
-        NX_PACKET *nxPacket = NULL;
-
-        status  = nx_udp_socket_receive(&si->rxSocket, &nxPacket, NX_NO_WAIT);
-        if (status == NX_SUCCESS) {
-            WOLFSSL *ssl = NULL;
-            unsigned short peerId;
-            unsigned short epoch;
-
-            epoch = GetEpoch(nxPacket);
-            si->rxPacket = nxPacket;
-            if (epoch == curEpoch)
-                ssl = curSsl;
-            else if (epoch < curEpoch)
-                ssl = prevSsl;
-            else if (epoch > curEpoch) {
-                rekeyTrigger = 1;
-                /* We may have missed a new key update or a switch keys. */
-                gSwitchKeys[0] = epoch;
-                gSwitchKeys[1] = epoch;
-                gSwitchKeys[2] = epoch;
-            }
-
-            if (ssl != NULL) {
-                int n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
-                if (n < 0) {
-                    n = wolfSSL_get_error(ssl, n);
-                    if (n == VERIFY_MAC_ERROR || n == DECRYPT_ERROR) {
+    if (!error) {
+        USHORT peerId;
+        int n = wolfWrapper_Read(wrapper, &peerId, msg, MSG_SIZE);
+        if (n > 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
-                        WCPRINTF("Allowable DTLS error. Ignoring a message.\n");
+            WCPRINTF("msg from peer %u: %s\n", peerId, msg);
 #endif
-                    }
-                    else if (n != SSL_ERROR_WANT_READ) {
-                        error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                        WCERR(wolfSSL_ERR_reason_error_string(n));
-#endif
-                    }
-                }
-                else {
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                    WCPRINTF("got msg from peer %u %s\n", peerId, msg);
-#endif
-                }
-            }
-            else {
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                WCPRINTF("Ignoring message unknown Epoch.\n");
-#endif
-            }
-
-            if (si->rxPacket != NULL) {
-                status = nx_packet_release(si->rxPacket);
-                if (status != NX_SUCCESS) {
-                    error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                    WCERR("couldn't release packet");
-#endif
-                }
-                si->rxPacket = NULL;
-            }
         }
+    }
 #else
+    if (!error) {
         byte packet[1500];
         ssize_t n;
 
@@ -1055,8 +984,8 @@ WolfcastClient(SocketInfo_t *si,
 #endif
             }
         }
-#endif
     }
+#endif
 
     if (!error) {
         unsigned int rxtime;
@@ -1066,13 +995,13 @@ WolfcastClient(SocketInfo_t *si,
             int msg_len;
             int n;
 
-            sprintf(msg, "%u sending message %d", myId, (*count)++);
+            sprintf(msg, "%u sending message %d", wrapper->myId, (*count)++);
             msg_len = (int)strlen(msg) + 1;
-            n = wolfSSL_write(curSsl, msg, msg_len);
+            n = wolfWrapper_Write(wrapper, msg, msg_len);
             if (n < 0) {
                 error = 1;
-                n = wolfSSL_get_error(curSsl, n);
 #if WOLFCAST_LOGGING_LEVEL >= 1
+                n = wolfSSL_get_error(wrapper->curSsl, n);
                 WCERR(wolfSSL_ERR_reason_error_string(n));
 #endif
             }

@@ -309,7 +309,7 @@ restart:
     wolfSSL_set_using_nonblock(peer->ssl, 1);
 
     ret = wolfSSL_set_secret(peer->ssl, 1, keyResp->pms, sizeof(keyResp->pms),
-        keyResp->clientRandom, keyResp->serverRandom, suite);
+        keyResp->clientRandom[0], keyResp->serverRandom[0], suite);
     if (ret != SSL_SUCCESS) printf("cannot set ssl secret error\n");
 
     while (gStopPeers == 0) {
