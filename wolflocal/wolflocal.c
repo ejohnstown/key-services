@@ -672,7 +672,7 @@ NetxDtlsTxCallback(
     (void)ssl;
 
     if (ctx == NULL || buf == NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("transmit callback invalid parameters\n");
 #endif
         goto exit;
@@ -682,7 +682,7 @@ NetxDtlsTxCallback(
     status = nx_packet_allocate(wrapper->pool, &pkt,
                                 NX_UDP_PACKET, NX_WAIT_FOREVER);
     if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("couldn't allocate packet wrapper\n");
 #endif
         goto exit;
@@ -691,7 +691,7 @@ NetxDtlsTxCallback(
     status = nx_packet_data_append(pkt, buf, sz,
                                    wrapper->pool, NX_WAIT_FOREVER);
     if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("couldn't append data to packet\n");
 #endif
         goto exit;
@@ -700,7 +700,7 @@ NetxDtlsTxCallback(
     status = nx_udp_socket_send(&wrapper->realTxSocket, pkt,
                                 wrapper->groupAddr, wrapper->groupPort);
     if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("tx error\n");
 #endif
         goto exit;
@@ -713,7 +713,7 @@ exit:
         /* In case of error, release packet. */
         status = nx_packet_release(pkt);
         if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
             KS_PRINTF("couldn't release packet\n");
 #endif
         }
@@ -737,7 +737,7 @@ NetxDtlsRxCallback(
     (void)ssl;
 
     if (ctx == NULL || buf == NULL || sz <= 0) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("receive callback invalid parameters\n");
 #endif
         goto exit;
@@ -746,7 +746,7 @@ NetxDtlsRxCallback(
     wrapper = (wolfWrapper_t*)ctx;
     pkt = wrapper->rxPacket;
     if (pkt == NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("no packet\n");
 #endif
         status = NX_NO_PACKET;
@@ -755,14 +755,14 @@ NetxDtlsRxCallback(
 
     status = nx_packet_length_get(pkt, &rxSz);
     if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("couldn't get packet length\n");
 #endif
         goto exit;
     }
 
     if (rxSz > (unsigned long)sz) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("receive packet too large for buffer\n");
 #endif
         goto exit;
@@ -770,7 +770,7 @@ NetxDtlsRxCallback(
 
     status = nx_packet_data_retrieve(pkt, buf, &rxSz);
     if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("couldn't retrieve packet\n");
 #endif
         goto exit;
@@ -787,7 +787,7 @@ exit:
     if (pkt != NULL) {
         status = nx_packet_release(pkt);
         if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
             KS_PRINTF("couldn't release packet\n");
 #endif
         }
@@ -835,7 +835,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     ret = wolfSSL_Init();
     if (ret != SSL_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("wolfWrapper_Init couldn't initialize wolfSSL\n");
 #endif
         goto exit;
@@ -845,7 +845,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                          wolfDTLSv1_2_client_method_ex,
                                          heap, heapSz, 0, 2);
     if (ret != SSL_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("unable to load static memory and create ctx\n");
 #endif
         goto exit;
@@ -855,7 +855,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     wolfSSL_SetIORecv(wrapper->ctx, NetxDtlsRxCallback);
     ret = wolfSSL_CTX_mcast_set_member_id(wrapper->ctx, myId);
     if (ret != SSL_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("set mcast member id error\n");
 #endif
         goto exit;
@@ -863,12 +863,12 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     ret = nx_udp_enable(wrapper->ip);
     if (ret == NX_ALREADY_ENABLED) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("UDP already enabled\n");
 #endif
     }
     else if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("cannot enable UDP\n");
 #endif
         goto exit;
@@ -876,12 +876,12 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     ret = nx_igmp_enable(wrapper->ip);
     if (ret == NX_ALREADY_ENABLED) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("IGMP already enabled\n");
 #endif
     }
     else if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("cannot enable IGMP\n");
 #endif
         goto exit;
@@ -892,7 +892,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                NX_IP_NORMAL, NX_DONT_FRAGMENT,
                                NX_IP_TIME_TO_LIVE, 30);
     if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("unable to create tx socket\n");
 #endif
         goto exit;
@@ -900,7 +900,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     ret = nx_udp_socket_bind(&wrapper->realTxSocket, NX_ANY_PORT, NX_NO_WAIT);
     if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("tx bind failed\n");
 #endif
         goto exit;
@@ -909,7 +909,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     ret = nx_igmp_loopback_disable(wrapper->ip);
 
     if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("couldn't disable multicast loopback\n");
 #endif
         goto exit;
@@ -920,7 +920,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                NX_IP_NORMAL, NX_DONT_FRAGMENT,
                                NX_IP_TIME_TO_LIVE, 30);
     if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("unable to create rx socket\n");
 #endif
         goto exit;
@@ -929,7 +929,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     ret = nx_udp_socket_bind(&wrapper->realRxSocket,
                              wrapper->groupPort, NX_NO_WAIT);
     if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("rx bind failed\n");
 #endif
         goto exit;
@@ -937,7 +937,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     ret = nx_igmp_multicast_join(wrapper->ip, wrapper->groupAddr);
     if (ret != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("setsockopt mc add membership failed\n");
 #endif
         goto exit;
@@ -978,7 +978,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
     WOLFSSL* newSsl = NULL;
 
     if (wrapper == NULL || ssl == NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("wolfWrapper_NewWrapper invalid parameters\n");
 #endif
         goto exit;
@@ -986,7 +986,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
 
     newSsl = wolfSSL_new(wrapper->ctx);
     if (newSsl == NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("ssl new error\n");
 #endif
         goto exit;
@@ -999,7 +999,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
     for (i = 0; i < wrapper->peerIdListSz; i++) {
         ret = wolfSSL_mcast_peer_add(newSsl, wrapper->peerIdList[i], 0);
         if (ret != SSL_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
             KS_PRINTF("mcast add peer error\n");
 #endif
             goto exit;
@@ -1157,7 +1157,7 @@ int wolfWrapper_Write(wolfWrapper_t* wrapper, const void* buf, int sz)
     sentSz = wolfSSL_write(wrapper->curSsl, buf, sz);
     if (sentSz < 0) {
         sentSz = wolfSSL_get_error(wrapper->curSsl, sentSz);
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("wolfSSL error: %s\n",
                   wolfSSL_ERR_reason_error_string(sentSz));
 #endif
@@ -1199,7 +1199,7 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
     }
 
     if (ssl == NULL) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Ignoring message unknown Epoch.\n");
 #endif
         goto exit;
@@ -1209,12 +1209,12 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
     if (recvSz < 0) {
         recvSz = wolfSSL_get_error(ssl, recvSz);
         if (recvSz == VERIFY_MAC_ERROR || recvSz == DECRYPT_ERROR) {
-#if WOLFCAST_LOGGING_LEVEL >= 3
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("Allowable DTLS error. Ignoring a message.\n");
 #endif
         }
         else if (recvSz != SSL_ERROR_WANT_READ) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
             KS_PRINTF("wolfSSL error: %s\n",
                       wolfSSL_ERR_reason_error_string(recvSz));
 #endif
@@ -1226,7 +1226,7 @@ exit:
     if (wrapper->rxPacket != NULL) {
         status = nx_packet_release(wrapper->rxPacket);
         if (status != NX_SUCCESS) {
-#if WOLFCAST_LOGGING_LEVEL >= 1
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
             KS_PRINTF("couldn't release packet\n");
 #endif
         }
