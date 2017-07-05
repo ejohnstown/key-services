@@ -43,15 +43,15 @@
 #define BENCH_EMBEDDED
 
 #ifdef PGB000
-    #define LOCAL_ADDR "192.168.1.20"
-    #define KEY_SERV_LOCAL_ADDR 192,168,1,20
+    #define LOCAL_ADDR "192.168.20.20"
+    #define KEY_SERV_LOCAL_ADDR 192,168,20,20
     /* My local DHCP server always provides this address to PGB000. */
 #else
-    #define LOCAL_ADDR "192.168.1.80"
-    #define KEY_SERV_LOCAL_ADDR 192,168,1,80
+    #define LOCAL_ADDR "192.168.20.21"
+    #define KEY_SERV_LOCAL_ADDR 192,168,20,20
     /* PGB002 isn't using DHCP, it is hardcoded to this address. */
 #endif
-#define KEY_BCAST_ADDR 192,168,1,255
+#define KEY_BCAST_ADDR 192,168,20,255
 
 #define KEY_SOCKET_LOGGING_LEVEL 3
 #define KEY_SERVICE_LOGGING_LEVEL 3
@@ -65,8 +65,7 @@
 #ifdef PGB000
     #define WOLFLOCAL_TEST_KEY_SERVER
 #else /* PGB000/PGB002 */
-    #define WOLFLOCAL_TEST_KEY_REQUEST
-    #define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET
+    /*#define WOLFLOCAL_TEST_KEY_REQUEST*/
 #endif /* PGB002 */
 
 #define WOLFSSL_MAX_MTU 256

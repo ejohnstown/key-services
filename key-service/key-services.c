@@ -1055,7 +1055,7 @@ int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg
 
 #ifndef KEY_SERVICE_FORCE_CLIENT_TO_USE_NET
     /* check to see if server is running locally */
-    if (gKeyServerInitDone) {
+    if (gKeyServerRunning) {
         ret = KeyClient_GetLocal(reqType, msg, msgLen, heap);
     }
     else
@@ -1073,7 +1073,7 @@ int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* 
 
 #ifndef KEY_SERVICE_FORCE_CLIENT_TO_USE_NET
     /* check to see if server is running locally */
-    if (gKeyServerInitDone) {
+    if (gKeyServerRunning) {
         ret = KeyClient_GetLocal(reqType, msg, msgLen, heap);
     }
     else

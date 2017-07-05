@@ -96,10 +96,12 @@ unsigned int LowResTimer(void)
 static TX_THREAD gKeyBcastUdpThread;
 static TX_THREAD gKeyClientThread;
 static TX_THREAD gWolfCastClientThread[3];
+static TX_THREAD gKeyServerThread;
 
 static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[3][KS_STACK_SZ];
+static char gKeyServerStack[KS_STACK_SZ];
 static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
 
 #ifdef WOLFSSL_STATIC_MEMORY
@@ -111,10 +113,6 @@ static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
     MEMORY_SECTION unsigned char gWolfCastMemory[3][WOLFLOCAL_STATIC_MEMORY_SZ];
 #endif
 
-#ifdef WOLFLOCAL_TEST_KEY_SERVER
-    static TX_THREAD gKeyServerThread;
-    static char gKeyServerStack[KS_STACK_SZ];
-#endif
 
 /* Mutex for controlling the current key state. The Key
  * Client thread will be writing to the key state and
@@ -159,9 +157,6 @@ static int isNetworkReady(ULONG timeout)
 
     return isReady;
 }
-
-
-#ifdef WOLFLOCAL_TEST_KEY_SERVER
 
 
 static void
@@ -220,7 +215,9 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
+#ifdef WOLFLOCAL_TEST_KEY_SERVER
         KeyServer_Resume();
+#endif
         result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 2
@@ -232,8 +229,6 @@ KeyServerEntry(ULONG ignore)
     KeyServer_Free(gHeapHint);
     wolfSSL_Cleanup();
 }
-
-#endif
 
 
 static void
@@ -533,7 +528,6 @@ WolfLocalInit(void)
         return;
     }
 
-#ifdef WOLFLOCAL_TEST_KEY_SERVER
     status = tx_thread_create(&gKeyServerThread, "key service server",
                            KeyServerEntry, 0,
                            gKeyServerStack, sizeof(gKeyServerStack),
@@ -545,7 +539,6 @@ WolfLocalInit(void)
 #endif
         return;
     }
-#endif
 
     status = tx_thread_create(&gKeyClientThread, "key service client",
                            KeyClientEntry, 0,
@@ -590,33 +583,45 @@ void WolfLocalTimer(void)
 
     count++;
 
-#ifdef WOLFLOCAL_TEST_KEY_SERVER
-
     /* Give it a X count before trying to do anything. */
     if (count > WOLFLOCAL_TIMER_HOLDOFF) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("timer: %u\n", count);
 #endif
-        /* Every X seconds on the 0, generate new key. */
-        if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0 && !gRekeyPending) {
+        /* Every X seconds on the 0, ... */
+        if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
 #endif
-            ret = KeyServer_GenNewKey(gHeapHint);
-            if (ret) {
+            if (KeyServer_IsRunning()) {
+                if (!gRekeyPending) {
+                    ret = KeyServer_GenNewKey(gHeapHint);
+                    if (ret) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
-                KS_PRINTF("Failed to announce new key.\n");
+                        KS_PRINTF("Failed to announce new key.\n");
 #endif
+                    }
+                    else {
+                        status = tx_mutex_get(&gKeyStateMutex,
+                                              KS_TIMEOUT_KEY_STATE_WRITE);
+                        if (status == TX_SUCCESS) {
+                            gGetNewKey = 1;
+                            gRekeyPending = 1;
+                            gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
+                            tx_mutex_put(&gKeyStateMutex);
+                        }
+                    }
+                }
             }
             else {
+#ifdef WOLFLOCAL_TEST_KEY_REQUEST
                 status = tx_mutex_get(&gKeyStateMutex,
                                       KS_TIMEOUT_KEY_STATE_WRITE);
-                if (status == TX_SUCCESS) {
-                    gGetNewKey = 1;
-                    gRekeyPending = 1;
-                    gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
+                if (status == NX_SUCCESS) {
+                    gRequestRekey = 1;
                     tx_mutex_put(&gKeyStateMutex);
                 }
+#endif /* WOLFLOCAL_TEST_KEY_REQUEST */
             }
         }
 
@@ -651,31 +656,6 @@ void WolfLocalTimer(void)
             }
         }
     }
-
-#endif /* WOLFLOCAL_TEST_KEY_SERVER */
-
-#ifdef WOLFLOCAL_TEST_KEY_REQUEST
-
-    /* Give it a X count before trying to do anything. */
-    if (count > WOLFLOCAL_TIMER_HOLDOFF) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("timer: %u\n", count);
-#endif
-        /* Every X seconds on the 0, request new key. */
-        if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
-#endif
-            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
-            if (status == NX_SUCCESS) {
-                gRequestRekey = 1;
-                tx_mutex_put(&gKeyStateMutex);
-            }
-        }
-    }
-
-#endif /* WOLFLOCAL_TEST_KEY_REQUEST */
-
 }
 
 
