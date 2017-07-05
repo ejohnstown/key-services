@@ -130,6 +130,8 @@ int KeyServer_Init(void* heap);
 typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
 int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
 int KeyServer_IsRunning(void);
+void KeyServer_Pause(void);
+void KeyServer_Resume(void);
 void KeyServer_Stop(void);
 int KeyServer_GenNewKey(void* heap);
 int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,

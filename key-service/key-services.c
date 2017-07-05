@@ -512,7 +512,6 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
         goto exit;
 
     /* main loop for accepting and responding to clients */
-    gKeyServerRunning = 1;
     while (gKeyServerStop == 0) {
         ret = KeySocket_Accept(listenfd, &connfd, 100);
         if (ret > 0) {
@@ -557,16 +556,18 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
                     reqCb(&reqPkt);
                 /* This callback may modify the request. */
 
-                /* get response */
-                KeyReq_GetResp(reqPkt.header.type, &resp, &n);
+                if (gKeyServerRunning) {
+                    /* get response */
+                    KeyReq_GetResp(reqPkt.header.type, &resp, &n);
 
-                /* write response */
-                if (wolfSSL_write(ssl, resp, n) != n) {
-                    ret = wolfSSL_get_error(ssl, 0);
-                #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("KeyServer_Run: write error %d\n", ret);
-                #endif
-                    goto cleanup;
+                    /* write response */
+                    if (wolfSSL_write(ssl, resp, n) != n) {
+                        ret = wolfSSL_get_error(ssl, 0);
+                    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                        printf("KeyServer_Run: write error %d\n", ret);
+                    #endif
+                        goto cleanup;
+                    }
                 }
             }
             if (n < 0) {
@@ -660,6 +661,16 @@ int KeyServer_NewKeyChange(void* heap)
 int KeyServer_IsRunning(void)
 {
     return gKeyServerRunning;
+}
+
+void KeyServer_Pause(void)
+{
+    gKeyServerRunning = 0;
+}
+
+void KeyServer_Resume(void)
+{
+    gKeyServerRunning = 1;
 }
 
 void KeyServer_Stop(void)

@@ -220,6 +220,7 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
+        KeyServer_Resume();
         result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 2

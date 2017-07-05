@@ -405,6 +405,7 @@ static int KeyServerStart(pthread_t* tid, pthread_t* tid_udp)
 {
     int ret = 0;
 
+    KeyServer_Resume();
     /* start key server on UDP */
     ret = pthread_create(tid_udp, NULL, KeyBcastUdpThread, NULL);
     if (ret < 0) {
