@@ -133,6 +133,10 @@ static struct in_addr gKeySrvAddr = { 0 };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
 wolfWrapper_t gWrappers[3];
+ULONG gAddr = 0;
+ULONG gMask = 0;
+static struct in_addr gGroupAddr;
+
 
 const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID, OTHER_CLIENT_ID };
 #define PEER_ID_LIST_SZ (sizeof(gPeerIdList)/sizeof(gPeerIdList[0]))
@@ -143,19 +147,33 @@ extern unsigned short gKeyServerEpoch;
 extern unsigned char gPeerId;
 
 
-static int isNetworkReady(ULONG timeout)
+static int isAddrSet(void)
 {
+    int isSet = 0;
     UINT status;
-    UINT ipStatus = 0;
+    ULONG addr, mask;
+
+    if (nxIp) {
+        status = nx_ip_address_get(nxIp, &addr, &mask);
+        if (status == NX_SUCCESS && addr != 0 &&
+            ((addr & 0xFFFF0000UL) != IP_ADDRESS(169,254,0,0))) {
+
+            gAddr = addr;
+            gMask = mask;
+            isSet = 1;
+        }
+    }
+
+    return isSet;
+}
+
+
+static int isNetworkReady(void)
+{
     int isReady = 0;
 
-    if (nxIp != NULL) {
-        status = nx_ip_status_check(nxIp,
-                                    NX_IP_RARP_COMPLETE, &ipStatus,
-                                    timeout);
-        if (status == NX_SUCCESS && ipStatus == NX_IP_RARP_COMPLETE)
-            isReady = 1;
-    }
+    if (gAddr != 0)
+        isReady = 1;
 
     return isReady;
 }
@@ -196,10 +214,11 @@ KeyServerEntry(ULONG ignore)
 #endif
     }
 
-    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+    while (!isNetworkReady()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Key server waiting for network.\n");
 #endif
+        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     while (gHeapHint == NULL) {
@@ -209,7 +228,10 @@ KeyServerEntry(ULONG ignore)
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
-    result = KeyServer_Init(gHeapHint);
+    {
+        struct in_addr inaddr = { .s_addr = gAddr };
+        result = KeyServer_Init(gHeapHint, &inaddr);
+    }
     if (result != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
         KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
@@ -282,10 +304,11 @@ KeyBcastUdpEntry(ULONG ignore)
 
     (void)ignore;
 
-    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+    while (!isNetworkReady()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Key Service bcast udp server waiting for network.\n");
 #endif
+        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     while (gHeapHint == NULL) {
@@ -329,10 +352,11 @@ KeyClientEntry(ULONG ignore)
         return;
     }
 
-    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+    while (!isAddrSet()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("Key Service client waiting for network.\n");
+        KS_PRINTF("Key Service client waiting for IP Address.\n");
 #endif
+        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     while (gHeapHint == NULL) {
@@ -445,10 +469,11 @@ WolfCastClientEntry(ULONG streamId)
     unsigned int txCount;
     int error;
 
-    while (!isNetworkReady(KS_TIMEOUT_NETWORK_READY)) {
+    while (!isNetworkReady()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("wolfCast thread %u waiting for network.\n", streamId);
 #endif
+        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     wrapper = &gWrappers[streamId];

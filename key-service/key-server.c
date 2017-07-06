@@ -73,6 +73,7 @@ int main(int argc, char **argv)
     int ret = 0;
     void* heap = NULL;
     pthread_t tid;
+    struct in_addr myAddr;
 
     (void)argc;
     (void)argv;
@@ -81,13 +82,14 @@ int main(int argc, char **argv)
     wolfSSL_Debugging_ON();
 #endif
 
+    inet_pton(AF_INET, "192.168.1.154", &myAddr);
     ret = wolfSSL_Init();
     if (ret != SSL_SUCCESS) {
         printf("Error: wolfSSL_Init\n");
         goto exit;
     }
 
-    ret = KeyServer_Init(heap);
+    ret = KeyServer_Init(heap, &myAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();

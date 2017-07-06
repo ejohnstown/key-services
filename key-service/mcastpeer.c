@@ -520,7 +520,10 @@ int main(int argc, char** argv)
         goto exit;
     }
 
-    ret = KeyServer_Init(heap);
+    {
+        struct in_addr ipaddr = { .s_addr = KEY_SERVER_IP };
+        ret = KeyServer_Init(heap, &ipaddr);
+    }
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();

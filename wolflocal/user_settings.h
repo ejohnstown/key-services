@@ -42,17 +42,6 @@
 #define NO_MAIN_DRIVER
 #define BENCH_EMBEDDED
 
-#ifdef PGB000
-    #define LOCAL_ADDR "192.168.20.20"
-    #define KEY_SERV_LOCAL_ADDR 192,168,20,20
-    /* My local DHCP server always provides this address to PGB000. */
-#else
-    #define LOCAL_ADDR "192.168.20.21"
-    #define KEY_SERV_LOCAL_ADDR 192,168,20,20
-    /* PGB002 isn't using DHCP, it is hardcoded to this address. */
-#endif
-#define KEY_BCAST_ADDR 192,168,20,255
-
 #define KEY_SOCKET_LOGGING_LEVEL 3
 #define KEY_SERVICE_LOGGING_LEVEL 3
 #define WOLFCAST_LOGGING_LEVEL 3

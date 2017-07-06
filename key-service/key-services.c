@@ -264,13 +264,11 @@ static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
     return ret;
 }
 
-int KeyServer_Init(void* heap)
+int KeyServer_Init(void* heap, const struct in_addr* srvAddr)
 {
     int ret = 0;
 
     if (++gKeyServerInitDone == 1) {
-        const unsigned char ipaddr[4] = {KEY_SERV_LOCAL_ADDR};
-
         /* init each command type */
         ret = KeyReq_BuildKeyReq(heap);
         if (ret != 0)
@@ -279,10 +277,14 @@ int KeyServer_Init(void* heap)
         if (ret != 0)
             return ret;
 
-        ret = BuildPacket(NULL, CMD_PKT_TYPE_DISCOVER, sizeof(ipaddr), ipaddr, heap);
+        ret = BuildPacket(NULL, CMD_PKT_TYPE_DISCOVER,
+                          sizeof(*srvAddr), (unsigned char *)srvAddr,
+                          heap);
         if (ret != 0)
             return ret;
-        ret = BuildPacket(NULL, CMD_PKT_TYPE_KEY_CHG, sizeof(ipaddr), ipaddr, heap);
+        ret = BuildPacket(NULL, CMD_PKT_TYPE_KEY_CHG,
+                          sizeof(*srvAddr), (unsigned char *)srvAddr,
+                          heap);
         if (ret != 0)
             return ret;
     }

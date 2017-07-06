@@ -126,7 +126,7 @@ static const unsigned char g_TlsPsk[4] = {
 
 
 /* API's */
-int KeyServer_Init(void* heap);
+int KeyServer_Init(void* heap, const struct in_addr* srvAddr);
 typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
 int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
 int KeyServer_IsRunning(void);

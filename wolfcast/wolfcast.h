@@ -3,7 +3,6 @@
 
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
-#include "wolflocal.h"
 
 #ifndef NETX
     #include <arpa/inet.h>
@@ -17,6 +16,7 @@
         unsigned long rxPacketSz;
     } SocketInfo_t;
 #else
+    #include "wolflocal.h"
     #include "nx_api.h"
     #ifdef PGB000
         #include "pgb000_com.h"

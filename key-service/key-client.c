@@ -79,7 +79,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    ret = KeyServer_Init(heap);
+    ret = KeyServer_Init(heap, &gKeySrvAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();
