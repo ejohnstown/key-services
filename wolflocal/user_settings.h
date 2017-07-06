@@ -74,8 +74,7 @@
 #define WOLFMEM_MAX_BUCKETS 6
 /* The static memory size is based on the above constants, and calculated
  * by the function wolfSSL_StaticBufferSz(). */
-//#define WOLFLOCAL_STATIC_MEMORY_SZ 25424
-#define WOLFLOCAL_STATIC_MEMORY_SZ 50000
+#define WOLFLOCAL_STATIC_MEMORY_SZ 25424
 
 #define KEY_SOCKET_RECVFROM_TIMEOUT 300
 
