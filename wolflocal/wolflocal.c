@@ -1,7 +1,9 @@
 #include "types.h"
 #include "wolflocal.h"
+#if 0
 #include "benchmark.h"
 #include "wolftest.h"
+#endif
 #include "key-services.h"
 #include "wolfcast.h"
 #include <wolfssl/error-ssl.h>
@@ -484,8 +486,15 @@ WolfLocalInit(void)
     UINT status;
     int i;
 
+#if 0
+    /* The wolfcrypt_test() and benchmark_test() are currently removed.
+     * The wolfcrypt_test() causes trouble with the RX board. It uses
+     * too much memory on the stack to perform the memory test, and the
+     * cipher tests use 30k of global data at startup and keeps it
+     * forever. */
     wolfcrypt_test(NULL);
     benchmark_test(NULL);
+#endif
 
     gPeerId = CLIENT_ID;
 
