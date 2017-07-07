@@ -214,7 +214,7 @@ KeyServerEntry(ULONG ignore)
 #endif
     }
 
-    while (!isNetworkReady()) {
+    while (!isAddrSet()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Key server waiting for network.\n");
 #endif
@@ -352,7 +352,7 @@ KeyClientEntry(ULONG ignore)
         return;
     }
 
-    while (!isAddrSet()) {
+    while (!isNetworkReady()) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 2
         KS_PRINTF("Key Service client waiting for IP Address.\n");
 #endif
