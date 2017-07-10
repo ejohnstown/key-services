@@ -119,7 +119,9 @@ void KeyServer_Pause(void);
 void KeyServer_Resume(void);
 void KeyServer_Stop(void);
 int KeyServer_GenNewKey(void* heap);
-int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,
+int KeyServer_SetKeyResp(KeyRespPacket_t* keyRespPkt, void* heap);
+int KeyServer_SetNewKey(unsigned short epoch,
+    unsigned char* pms, int pmsSz,
     unsigned char* serverRandom, int serverRandomSz,
     unsigned char* clientRandom, int clientRandomSz, void* heap);
 int KeyServer_NewKeyUse(void* heap);

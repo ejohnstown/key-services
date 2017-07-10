@@ -32,6 +32,7 @@ static volatile int   gKeyServerInitDone = 0;
 static int            gKeyServerRunning = 0;
 static int            gKeyServerStop = 0;
        unsigned short gKeyServerEpoch;
+static struct in_addr gKeyServAddr;
 static struct in_addr gBcastAddr;
 unsigned char         gPeerId = 0;
 static unsigned short gKeyServPort;
@@ -135,7 +136,8 @@ static inline int BuildPacket(CmdPacket_t** pPkt, int type, int msgLen,
     return 0;
 }
 
-static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
+static int KeyReq_BuildKeyReq_Ex(unsigned short epoch,
+    unsigned char* pms, int pmsSz,
     unsigned char* serverRandom, int serverRandomSz,
     unsigned char* clientRandom, int clientRandomSz, void* heap)
 {
@@ -161,11 +163,17 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
     }
 
     if (ret == 0) {
-        /* populate response packet */
-        c16toa(++gKeyServerEpoch, pkt->msg.keyResp.epoch);
+        if (epoch == 0) {
+            /* populate response packet */
+            ++gKeyServerEpoch;
+        }
+        else {
+            gKeyServerEpoch = epoch;
+        }
+        c16toa(gKeyServerEpoch, pkt->msg.keyResp.epoch);
+
         pkt->msg.keyResp.suite[0] = CIPHER_SUITE_0;
         pkt->msg.keyResp.suite[1] = CIPHER_SUITE_1;
-
         /* use args if provided */
         if (pms) {
             if (pmsSz > PMS_SIZE) pmsSz = PMS_SIZE;
@@ -173,11 +181,15 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
         }
         if (serverRandom) {
             if (serverRandomSz > RAND_SIZE) serverRandomSz = RAND_SIZE;
-            XMEMCPY(pkt->msg.keyResp.serverRandom, serverRandom, serverRandomSz);
+            XMEMCPY(pkt->msg.keyResp.serverRandom[0], serverRandom, serverRandomSz);
+            XMEMCPY(pkt->msg.keyResp.serverRandom[1], serverRandom, serverRandomSz);
+            XMEMCPY(pkt->msg.keyResp.serverRandom[2], serverRandom, serverRandomSz);
         }
         if (clientRandom) {
             if (clientRandomSz > RAND_SIZE) clientRandomSz = RAND_SIZE;
-            XMEMCPY(pkt->msg.keyResp.clientRandom, clientRandom, clientRandomSz);
+            XMEMCPY(pkt->msg.keyResp.clientRandom[0], clientRandom, clientRandomSz);
+            XMEMCPY(pkt->msg.keyResp.clientRandom[1], clientRandom, clientRandomSz);
+            XMEMCPY(pkt->msg.keyResp.clientRandom[2], clientRandom, clientRandomSz);
         }
     }
 
@@ -186,7 +198,7 @@ static int KeyReq_BuildKeyReq_Ex(unsigned char* pms, int pmsSz,
 
 static int KeyReq_BuildKeyReq(void* heap)
 {
-    return KeyReq_BuildKeyReq_Ex(NULL, 0, NULL, 0, NULL, 0, heap);
+    return KeyReq_BuildKeyReq_Ex(0, NULL, 0, NULL, 0, NULL, 0, heap);
 }
 
 static int KeyReq_BuildKeyUse(void* heap)
@@ -272,6 +284,7 @@ int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
     int ret = 0;
 
     if (++gKeyServerInitDone == 1) {
+        gKeyServAddr = *srvAddr;
         gKeyBcastPort = keyBcastPort;
         gKeyServPort = keyServPort;
 
@@ -434,6 +447,11 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
             if (gKeyServerRunning) {
                 unsigned char* resp = NULL;
 
+                if (reqPkt.header.type == 0) {
+                    CmdPacket_t* pPkt;
+                    BuildPacket(&pPkt, 0, sizeof(gKeyServAddr),
+                                (unsigned char*)&gKeyServAddr, heap);
+                }
                 /* get response */
                 KeyReq_GetResp(reqPkt.header.type, &resp, &n);
 
@@ -636,12 +654,28 @@ exit:
     return ret;
 }
 
-int KeyServer_SetNewKey(unsigned char* pms, int pmsSz,
+int KeyServer_SetNewKey(unsigned short epoch,
+    unsigned char* pms, int pmsSz,
     unsigned char* serverRandom, int serverRandomSz,
     unsigned char* clientRandom, int clientRandomSz, void* heap)
 {
-    return KeyReq_BuildKeyReq_Ex(pms, pmsSz, serverRandom, serverRandomSz,
+    return KeyReq_BuildKeyReq_Ex(epoch, pms, pmsSz,
+        serverRandom, serverRandomSz,
         clientRandom, clientRandomSz, heap);
+}
+
+int KeyServer_SetKeyResp(KeyRespPacket_t* keyRespPkt, void* heap)
+{
+    int result;
+
+    result = KeyReq_BuildKeyReq_Ex(0, NULL, 0, NULL, 0, NULL, 0, heap);
+    if (result == 0) {
+        ato16(keyRespPkt->epoch, &gKeyServerEpoch);
+        XMEMCPY(gRespPkt[CMD_PKT_TYPE_KEY_REQ]->msg.raw,
+                keyRespPkt, sizeof(KeyRespPacket_t));
+    }
+
+    return result;
 }
 
 /* KeyServer_GenNewKey

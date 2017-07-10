@@ -236,7 +236,8 @@ KeyServerEntry(ULONG ignore)
     }
 
     {
-        struct in_addr inaddr = { .s_addr = gAddr };
+        struct in_addr inaddr;
+        inaddr.s_addr = gAddr;
         result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
     }
     if (result != 0) {
@@ -246,9 +247,6 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
-#ifdef WOLFLOCAL_TEST_KEY_SERVER
-        KeyServer_Resume();
-#endif
         result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 2
@@ -398,11 +396,12 @@ KeyClientEntry(ULONG ignore)
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
 #endif
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
+                KS_PRINTF("Taking over as key server.\n");
+#endif
                 KeyServer_Resume();
             }
-            else {
-                findMaster = 0;
-            }
+            findMaster = 0;
         }
 
         if (!findMaster && requestRekey && !storeKey) {
@@ -445,6 +444,7 @@ KeyClientEntry(ULONG ignore)
                 KS_PRINTF("Key client got key\n");
 #endif
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
+                KeyServer_SetKeyResp(&gKeyState, gHeapHint);
                 gKeySet[0] = 1;
                 gKeySet[1] = 1;
                 gKeySet[2] = 1;
