@@ -77,6 +77,9 @@ unsigned int LowResTimer(void)
     #define WOLFLOCAL_TIMER_HOLDOFF 20
 #endif
 
+#ifndef WOLFLOCAL_FIND_MASTER_PERIOD
+    #define WOLFLOCAL_FIND_MASTER_PERIOD 5
+#endif
 
 #ifdef PGB000
     #include "pgb000_com.h"
@@ -395,6 +398,7 @@ KeyClientEntry(ULONG ignore)
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
 #endif
+                KeyServer_Resume();
             }
             else {
                 findMaster = 0;
@@ -616,9 +620,6 @@ void WolfLocalTimer(void)
     UINT status;
     int ret;
 
-    (void)status;
-    (void)ret;
-
     count++;
 
     /* Give it a X count before trying to do anything. */
@@ -690,6 +691,25 @@ void WolfLocalTimer(void)
                             tx_mutex_put(&gKeyStateMutex);
                         }
                     }
+                }
+            }
+        }
+
+        if ((count % WOLFLOCAL_FIND_MASTER_PERIOD) == 3) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+            KS_PRINTF("timer: %u on the 3\n", WOLFLOCAL_FIND_MASTER_PERIOD);
+#endif
+            if (!KeyServer_IsRunning()) {
+                struct in_addr scratch;
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+            KS_PRINTF("finding the master\n");
+#endif
+                ret = KeyClient_FindMaster(&scratch, gHeapHint);
+                if (ret != 0) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
+                    KS_PRINTF("Key server didn't announce itself, becoming master.\n");
+#endif
+                    KeyServer_Resume();
                 }
             }
         }
