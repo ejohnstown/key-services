@@ -3,6 +3,8 @@
 static volatile int gKeyChg = 0;
 static struct in_addr gKeySrvAddr;
 static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
+#define KEY_BCAST_PORT 22222
+#define KEY_SERV_PORT 11111
 
 
 #ifndef NETX
@@ -79,7 +81,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    ret = KeyServer_Init(heap, &gKeySrvAddr);
+    ret = KeyServer_Init(heap, &gKeySrvAddr, KEY_BCAST_PORT, KEY_SERV_PORT);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();

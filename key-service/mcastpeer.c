@@ -17,6 +17,8 @@
 
 /* configration */
 #define KEY_SERVER_IP       IP_ADDRESS(127,0,0,1)
+#define KEY_SERVER_PORT     11111
+#define KEY_BCAST_PORT      22222
 #define GROUP_ADDR          IP_ADDRESS(226,0,0,3)
 #define GROUP_PORT          12345
 #define MSG_SIZE            sizeof(KeyRespPacket_t)
@@ -522,7 +524,7 @@ int main(int argc, char** argv)
 
     {
         struct in_addr ipaddr = { .s_addr = KEY_SERVER_IP };
-        ret = KeyServer_Init(heap, &ipaddr);
+        ret = KeyServer_Init(heap, &ipaddr, KEY_BCAST_PORT, KEY_SERVER_PORT);
     }
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");

@@ -34,6 +34,8 @@ static int            gKeyServerStop = 0;
        unsigned short gKeyServerEpoch;
 static struct in_addr gBcastAddr;
 unsigned char         gPeerId = 0;
+static unsigned short gKeyServPort;
+static unsigned short gKeyBcastPort;
 
 #ifdef WOLFSSL_STATIC_MEMORY
     #if defined(NETX) && defined(PGB002)
@@ -264,11 +266,15 @@ static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
     return ret;
 }
 
-int KeyServer_Init(void* heap, const struct in_addr* srvAddr)
+int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
+                   unsigned short keyBcastPort, unsigned short keyServPort)
 {
     int ret = 0;
 
     if (++gKeyServerInitDone == 1) {
+        gKeyBcastPort = keyBcastPort;
+        gKeyServPort = keyServPort;
+
         /* init each command type */
         ret = KeyReq_BuildKeyReq(heap);
         if (ret != 0)
@@ -368,6 +374,14 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
 
     (void)heap;
 
+    if (gKeyBcastPort == 0) {
+        ret = -1;
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("KeyBcast_RunUdp Error: broadcast port not set\n");
+#endif
+        goto exit;
+    }
+
     /* copy address to global for key change */
     XMEMCPY(&gBcastAddr, srvAddr, sizeof(struct in_addr));
 
@@ -384,7 +398,7 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
     KeySocket_SetBroadcast(listenfd);
 
     /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_BCAST_PORT, 1);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyBcastPort, 1);
     if (ret != 0)
         goto exit;
 
@@ -453,7 +467,7 @@ exit:
     }
 #endif
 
-    KeySocket_Unlisten(KEY_BCAST_PORT);
+    KeySocket_Unlisten(gKeyBcastPort);
     KeySocket_Close(&listenfd);
     KeySocket_Delete(&listenfd);
 
@@ -476,6 +490,14 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
     unsigned char* req = (unsigned char*)&reqPkt;
     unsigned char* resp;
     int n;
+
+    if (gKeyServPort == 0) {
+        ret = -1;
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("Error: key server port not set\n");
+    #endif
+        goto exit;
+    }
 
 #ifdef HAVE_NETX
     /* Extra lifting for NETX sockets */
@@ -505,10 +527,10 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
 #ifndef HAVE_NETX
     /* nx_tcp_socket_listen() binds the socket, so we shouldn't explicitly
      * bind it first. */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, KEY_SERV_PORT, 0);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyServPort, 0);
 #endif
     if (ret == 0) {
-        ret = KeySocket_Listen(listenfd, KEY_SERV_PORT, LISTENQ);
+        ret = KeySocket_Listen(listenfd, gKeyServPort, LISTENQ);
     }
     if (ret != 0)
         goto exit;
@@ -587,7 +609,7 @@ cleanup:
             KeySocket_Close(&connfd);
         }
 
-        ret = KeySocket_Relisten(connfd, listenfd, KEY_SERV_PORT);
+        ret = KeySocket_Relisten(connfd, listenfd, gKeyServPort);
         if (ret != 0)
             goto exit;
     }
@@ -604,7 +626,7 @@ exit:
 
     KeySocket_Close(&listenfd);
     KeySocket_Unaccept(listenfd);
-    KeySocket_Unlisten(KEY_SERV_PORT);
+    KeySocket_Unlisten(gKeyServPort);
     KeySocket_Delete(&listenfd);
 
     /* free up memory used by wolfSSL */
@@ -780,6 +802,14 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
 
     (void)heap;
 
+    if (gKeyServPort == 0) {
+        ret = -1;
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("KeyClient_GetNet Error: key server port not set\n");
+    #endif
+        goto exit;
+    }
+
     /* create and initialize WOLFSSL_CTX structure for TLS 1.2 only */
 #ifndef WOLFSSL_STATIC_MEMORY
     ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
@@ -812,7 +842,7 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     }
 
     /* Connect to socket */
-    ret = KeySocket_Connect(sockfd, srvAddr, KEY_SERV_PORT);
+    ret = KeySocket_Connect(sockfd, srvAddr, gKeyServPort);
     if (ret != 0) {
         goto exit;
     }
@@ -879,6 +909,13 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     socklen_t clientAddrLen = sizeof(clientAddr);
     int n;
 
+    if (gKeyBcastPort == 0) {
+        ret = -1;
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("KeyClient_NetUdpBcast Error: broadcast port not set\n", ret);
+#endif
+    }
+
     /* create socket */
     ret = KeySocket_CreateUdpSocket(&sockfd);
     if (ret != 0) {
@@ -891,7 +928,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     /* build broadcast addr */
     XMEMSET(&clientAddr, 0, sizeof(clientAddr));
     clientAddr.sin_family = AF_INET;
-    clientAddr.sin_port = htons(KEY_BCAST_PORT);
+    clientAddr.sin_port = htons(gKeyBcastPort);
 #ifndef HAVE_NETX
     clientAddr.sin_addr = *srvAddr;
     KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));

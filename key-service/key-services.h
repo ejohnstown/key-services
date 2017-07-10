@@ -14,22 +14,6 @@
 #define CIPHER_SUITE_1 0xFE
 #define MAX_ID_LEN     32 /* wolf supports up to 128 bytes */
 
-/* Subnet to broadcast key discovery message */
-#ifndef KEY_BCAST_ADDR
-    #error Please define KEY_BCAST_ADDR with comma notation
-#endif
-#ifndef KEY_BCAST_PORT
-    #define KEY_BCAST_PORT      22222
-#endif
-
-/* IP address to return for key server discovery */
-#ifndef KEY_SERV_LOCAL_ADDR
-    #error Please define KEY_SERV_LOCAL_ADDR with comma notation
-#endif
-#ifndef KEY_SERV_PORT
-    #define KEY_SERV_PORT       11111
-#endif
-
 
 #ifdef HAVE_NETX
     #define KEY_SERVICE_SLEEP(x) tx_thread_sleep(x)
@@ -126,7 +110,8 @@ static const unsigned char g_TlsPsk[4] = {
 
 
 /* API's */
-int KeyServer_Init(void* heap, const struct in_addr* srvAddr);
+int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
+    unsigned short keyBcastPort, unsigned short keyServPort);
 typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
 int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
 int KeyServer_IsRunning(void);

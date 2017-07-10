@@ -77,13 +77,6 @@ unsigned int LowResTimer(void)
     #define WOLFLOCAL_TIMER_HOLDOFF 20
 #endif
 
-#ifndef GROUP_PORT
-    #define GROUP_PORT 12345
-#endif
-#ifndef GROUP_ADDR
-    #define GROUP_ADDR 0xE2000003
-#endif
-
 
 #ifdef PGB000
     #include "pgb000_com.h"
@@ -135,7 +128,18 @@ static UINT gSwitchKeyCount = 0;
 wolfWrapper_t gWrappers[3];
 ULONG gAddr = 0;
 ULONG gMask = 0;
-static struct in_addr gGroupAddr;
+
+/* Group address for the wolfCast multicast group. */
+static struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
+
+/* Port number for the wolfCast multicast group. */
+static unsigned short gGroupPort = 12345;
+
+/* Port number for the KeyBcast server all endpoints run. */
+static unsigned short gBcastPort = 22222;
+
+/* Port number for the KeyServer all endpoints run. */
+static unsigned short gServPort = 11111;
 
 
 const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID, OTHER_CLIENT_ID };
@@ -230,7 +234,7 @@ KeyServerEntry(ULONG ignore)
 
     {
         struct in_addr inaddr = { .s_addr = gAddr };
-        result = KeyServer_Init(gHeapHint, &inaddr);
+        result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
     }
     if (result != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
@@ -479,7 +483,7 @@ WolfCastClientEntry(ULONG streamId)
     wrapper = &gWrappers[streamId];
 
     error = wolfWrapper_Init(wrapper, streamId, gPeerId,
-                             GROUP_PORT + streamId, GROUP_ADDR,
+                             gGroupPort + streamId, gGroupAddr.s_addr,
                              gPeerIdList, PEER_ID_LIST_SZ,
                              gWolfCastMemory[streamId],
                              sizeof(gWolfCastMemory[streamId]));

@@ -2,6 +2,8 @@
 #include "key-services.h"
 
 static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
+#define KEY_BCAST_PORT 22222
+#define KEY_SERV_PORT 11111
 
 static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
 {
@@ -89,7 +91,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    ret = KeyServer_Init(heap, &myAddr);
+    ret = KeyServer_Init(heap, &myAddr, KEY_BCAST_PORT, KEY_SERV_PORT);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();
