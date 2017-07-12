@@ -1293,3 +1293,37 @@ exit:
 
     return recvSz;
 }
+
+
+int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
+                              unsigned int* macDropCount,
+                              unsigned int* replayDropCount)
+{
+    unsigned int macCount = 0, replayCount = 0;
+    int ret = 0;
+
+    if (wrapper != NULL) {
+        ret = wolfSSL_dtls_get_drop_stats(wrapper->curSsl,
+                                          &macCount, &replayCount);
+        if (ret != SSL_SUCCESS) {
+            ret = 1;
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
+            KS_PRINTF("getting stats from DTLS session failed.\n");
+#endif
+        }
+        else
+            ret = 0;
+    }
+    else {
+#if WOLFLOCAL_LOGGING_LEVEL >= 2
+        KS_PRINTF("Tried to get error stats from wrapper NULL\n");
+#endif
+    }
+
+    if (macDropCount != NULL)
+        *macDropCount = macCount;
+    if (replayDropCount != NULL)
+        *replayDropCount = replayCount;
+
+    return ret;
+}

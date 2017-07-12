@@ -127,6 +127,7 @@ int KeyServer_SetNewKey(unsigned short epoch,
 int KeyServer_NewKeyUse(void* heap);
 int KeyServer_NewKeyChange(void* heap);
 void KeyServer_Free(void* heap);
+unsigned int KeyServer_GetAuthFailCount(void);
 
 int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
 int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);

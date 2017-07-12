@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "key-services.h"
+#include <wolfssl/error-ssl.h>
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
 #ifndef KEY_SERVICE_LOGGING_LEVEL
@@ -37,6 +38,7 @@ static struct in_addr gBcastAddr;
 unsigned char         gPeerId = 0;
 static unsigned short gKeyServPort;
 static unsigned short gKeyBcastPort;
+static unsigned int   gAuthFailCount = 0;
 
 #ifdef WOLFSSL_STATIC_MEMORY
     #if defined(NETX) && defined(PGB002)
@@ -324,6 +326,11 @@ void KeyServer_Free(void* heap)
     }
 }
 
+unsigned int KeyServer_GetAuthFailCount(void)
+{
+    return gAuthFailCount;
+}
+
 static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func, void* heap)
 {
     int ret = 0;
@@ -579,6 +586,9 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
                 printf("Error: wolfSSL_accept\n");
             #endif
+                ret = wolfSSL_get_error(ssl, ret);
+                if (ret == DECRYPT_ERROR)
+                    gAuthFailCount++;
                 goto cleanup;
             }
 

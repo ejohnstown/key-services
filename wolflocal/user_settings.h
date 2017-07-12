@@ -31,6 +31,7 @@
 #define BIG_ENDIAN_ORDER
 #define USER_TICKS
 #define WOLFSSL_DTLS_ALLOW_FUTURE
+#define WOLFSSL_DTLS_DROP_STATS
 
 #define THREADX
 #define HAVE_THREADX
@@ -65,7 +66,7 @@
  * by the function wolfSSL_StaticBufferSz(). */
 #define WOLFLOCAL_STATIC_MEMORY_SZ 25424
 
-#define KEY_SOCKET_RECVFROM_TIMEOUT 300
+#define KEY_SOCKET_RECVFROM_TIMEOUT 50
 
 int mySeed(unsigned char* output, unsigned int sz);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)
