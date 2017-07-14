@@ -17,6 +17,8 @@
 
 /* configration */
 #define KEY_SERVER_IP       IP_ADDRESS(127,0,0,1)
+#define KEY_SERVER_PORT     11111
+#define KEY_BCAST_PORT      22222
 #define GROUP_ADDR          IP_ADDRESS(226,0,0,3)
 #define GROUP_PORT          12345
 #define MSG_SIZE            sizeof(KeyRespPacket_t)
@@ -45,9 +47,12 @@ typedef struct PeerInfo {
 static int gPeerThreads;
 static PeerInfo_t* gPeers;
 static int gStopPeers = 0;
-static const struct in_addr gKeySrvAddr = { .s_addr = KEY_SERVER_IP };
+static struct in_addr gKeySrvAddr;
+static const struct in_addr gKeySrvAddrDef = { .s_addr = KEY_SERVER_IP };
 static const struct in_addr gGroupAddr = { .s_addr = GROUP_ADDR };
 static const struct in_addr gAnyAddr = { .s_addr = INADDR_ANY };
+static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
+static volatile int gKeyChg = 0;
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
 {
@@ -156,28 +161,29 @@ static void* PeerThread(void* arg)
     byte memory[80000];
     byte memoryIO[34500];
 #endif
-    struct in_addr keySrvAddr;
     unsigned char* addr;
     int opt = 1;
-    const unsigned char bcast_addr[] = {KEY_BCAST_ADDR};
     keyResp = (KeyRespPacket_t*)peer->msg; /* use peer msg buffer for key response info */
 
     gettimeofday(&start, NULL);
 
     /* set the broadcast address */
-    XMEMCPY(&keySrvAddr.s_addr, bcast_addr, sizeof(keySrvAddr.s_addr));
+    XMEMCPY(&gKeySrvAddr.s_addr, gBcastAddr, sizeof(gKeySrvAddr.s_addr));
 
     /* find master using UDP broadcast message */
-    ret = KeyClient_FindMaster(&keySrvAddr, heap);
+    ret = KeyClient_FindMaster(&gKeySrvAddr, heap);
     if (ret != 0) {
         printf("unable to find master %d\n", ret);
-        XMEMCPY(&keySrvAddr, &gKeySrvAddr, sizeof(gKeySrvAddr));
+        XMEMCPY(&gKeySrvAddr, &gKeySrvAddrDef, sizeof(gKeySrvAddr));
     }
-    addr = (unsigned char*)&keySrvAddr.s_addr;
+    addr = (unsigned char*)&gKeySrvAddr.s_addr;
     printf("Found Server: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
 
+restart:
+    printf("Getting new key\n");
+
     /* Get PMS, Server/Client Random from Key Server */
-    ret = KeyClient_GetKey(&keySrvAddr, keyResp, heap);
+    ret = KeyClient_GetKey(&gKeySrvAddr, keyResp, heap);
     if (ret != 0) {
         printf("unable to get key from server %d\n", ret);
 
@@ -305,7 +311,7 @@ static void* PeerThread(void* arg)
     wolfSSL_set_using_nonblock(peer->ssl, 1);
 
     ret = wolfSSL_set_secret(peer->ssl, 1, keyResp->pms, sizeof(keyResp->pms),
-        keyResp->clientRandom, keyResp->serverRandom, suite);
+        keyResp->clientRandom[0], keyResp->serverRandom[0], suite);
     if (ret != SSL_SUCCESS) printf("cannot set ssl secret error\n");
 
     while (gStopPeers == 0) {
@@ -320,6 +326,11 @@ static void* PeerThread(void* arg)
         ret = PeerReadStatus(peer, STATUS_INVERVAL_MS);
         if (ret != 0) {
             printf("Peer read status failed! Error %d\n", ret);
+            break;
+        }
+
+        if (gKeyChg) {
+            printf("Key Change\n");
             break;
         }
     }
@@ -339,20 +350,56 @@ exit:
     printf("Peer %d: Ret %d, Elapsed %d ms, TX %d, RX %d\n",
                 peer->id, peer->ret, peer->elapsedMs, peer->txCount, peer->rxCount);
 
+    if (ret == 0 && gKeyChg) {
+        gKeyChg = 0;
+        goto restart;
+    }
+
     return NULL;
+}
+
+void KeyServerReqPktCallback(CmdPacket_t* pkt)
+{
+    if (pkt == NULL)
+        return;
+
+    if (pkt->header.type == CMD_PKT_TYPE_KEY_REQ) {
+        printf("Key request.\n");
+    }
+
+    if (pkt->header.type == CMD_PKT_TYPE_KEY_NEW) {
+        printf("Rekey request.\n");
+    }
 }
 
 static void* KeyServerThread(void* arg)
 {
     void* heap = arg;
-    KeyServer_Run(heap);
+    KeyServer_Run(KeyServerReqPktCallback, heap);
     return NULL;
 }
 
-static void* KeyServerUdpThread(void* arg)
+static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+{
+    if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+        /* trigger key change */
+        unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
+        XMEMCPY(&gKeySrvAddr.s_addr, addr, sizeof(gKeySrvAddr.s_addr));
+        gKeyChg = 1;
+
+        printf("Key Change Server: %d.%d.%d.%d\n",
+            addr[0], addr[1], addr[2], addr[3]);
+    }
+}
+
+static void* KeyBcastUdpThread(void* arg)
 {
     void* heap = arg;
-    KeyServer_RunUdp(heap);
+    struct in_addr srvAddr;
+    XMEMCPY(&srvAddr.s_addr, gBcastAddr, sizeof(srvAddr.s_addr));
+
+    KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
+
     return NULL;
 }
 
@@ -360,10 +407,11 @@ static int KeyServerStart(pthread_t* tid, pthread_t* tid_udp)
 {
     int ret = 0;
 
+    KeyServer_Resume();
     /* start key server on UDP */
-    ret = pthread_create(tid_udp, NULL, KeyServerUdpThread, NULL);
+    ret = pthread_create(tid_udp, NULL, KeyBcastUdpThread, NULL);
     if (ret < 0) {
-        perror("key server UDP pthread_create failed");
+        perror("key broadcast UDP pthread_create failed");
         return ret;
     }
 
@@ -465,7 +513,7 @@ int main(int argc, char** argv)
 #endif
 
 #if defined(DEBUG_WOLFSSL)
-    //wolfSSL_Debugging_ON();
+    wolfSSL_Debugging_ON();
 #endif
 
     ret = wolfSSL_Init();
@@ -474,7 +522,10 @@ int main(int argc, char** argv)
         goto exit;
     }
 
-    ret = KeyServer_Init(heap);
+    {
+        struct in_addr ipaddr = { .s_addr = KEY_SERVER_IP };
+        ret = KeyServer_Init(heap, &ipaddr, KEY_BCAST_PORT, KEY_SERVER_PORT);
+    }
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();

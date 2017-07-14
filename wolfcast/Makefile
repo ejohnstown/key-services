@@ -1,6 +1,21 @@
-CFLAGS=-I. -I../key-service -g3 -DDEBUG
-LDFLAGS=-lwolfssl
-CPPFLAGS=-DLOCAL_ADDR=\"192.168.0.112\" -DKEY_SERV_LOCAL_ADDR="192,168,0,112" -DKEY_BCAST_ADDR="192,168,0,255"
+LIB_PATH=/usr/local
+CFLAGS=-Wall -I$(LIB_PATH)/include -I. -I../key-service
+LDFLAGS=
+
+# IP Addresses
+CFLAGS+=-DLOCAL_ADDR=\"192.168.0.100\" -DKEY_SERV_LOCAL_ADDR="192,168,0,100" -DKEY_BCAST_ADDR="192,168,0,255"
+
+# Dynamic wolfSSL library
+LDFLAGS+=-lwolfssl -lm -L$(LIB_PATH)/lib
+
+# Static wolfSSL library with Debug
+#CFLAGS+=-g3 -DDEBUG
+#LDFLAGS+=$(LIB_PATH)/lib/libwolfssl.a
+
+# Building wolfSSL
+#./configure --enable-psk --enable-mcast --enable-nullcipher CFLAGS="-DWOLFSSL_STATIC_PSK"
+# Build wolfSSL with Debug add --enable-debug --disable-shared
+
 
 all: wolfcast
 

@@ -20,12 +20,12 @@ typedef struct CmdPacketHeader {
     uint8_t  version; /* Version = 1 - Allows future protocol changes */
     uint8_t  type;    /* Type: 1=KeyReq, 2=Future Commands */
     uint16_t size;    /* Message Size (remaining packet bytes to follow) */
-} WOLFSSL_PACK CmdPacketHeader_t;
+} WOLFSSL_PACK CmdHeader_t;
 
 /* Command Request Packet */
 typedef struct CmdReqPacket {
     struct CmdPacketHeader header;
-} WOLFSSL_PACK CmdReqPacket_t;
+} WOLFSSL_PACK CmdPacket_t;
 
 /* Command Response Packet */
 typedef struct CmdRespPacket {
@@ -34,7 +34,7 @@ typedef struct CmdRespPacket {
         uint8_t msg[MAX_PACKET_MSG];
         KeyRespPacket_t keyResp;
     }
-} WOLFSSL_PACK CmdRespPacket_t;
+} WOLFSSL_PACK CmdPacket_t;
 
 typedef struct KeyRespPacket {
     uint8_t pms[PMS_SIZE];
@@ -63,7 +63,7 @@ int KeyClient_Get(const struct in_addr* srvAddr, int reqType, uint8_t* msg, int*
 ## Building wolfSSL
 
 ```
-./configure --enable-psk --enable-aesgcm CFLAGS="-DWOLFSSL_STATIC_PSK -DWOLFSSL_USER_IO" --enable-dtls --enable-mcast --enable-nullcipher
+./configure --enable-psk --enable-mcast --enable-nullcipher CFLAGS="-DWOLFSSL_STATIC_PSK"
 make
 sudo make install
 ```
@@ -72,7 +72,7 @@ sudo make install
 
 Build wolfSSL with debugging enabled. This will compile and install a static library.
 ```
-./configure --enable-psk --enable-aesgcm CFLAGS="-DWOLFSSL_STATIC_PSK -DWOLFSSL_USER_IO" --enable-dtls --enable-mcast --enable-nullcipher --enable-debug --disable-shared
+./configure --enable-psk --enable-mcast --enable-nullcipher --enable-debug --disable-shared CFLAGS="-DWOLFSSL_STATIC_PSK"
 make
 sudo make install
 ```
@@ -97,7 +97,7 @@ And comment out:
 Teriminal 1:
 
 ```
-./key-server 
+./key-server
 
 Connection from 127.0.0.1, port 60989
 Request: Version 1, Cmd 1, Size 0
@@ -123,7 +123,7 @@ This test tool creates threads simulating multiple peers. The default configurat
 The ./mcastpeer [threads] tool starts a key-service thread, then spawn up as many peer threads as incidated. It will first get the key from the key-server then start sending status at 50hz and reading in-between. Tracks elapsed time and rx/tx counts, which are displayed on termination with Ctrl+C.
 
 ```
-./mcastpeer 
+./mcastpeer
 Usage: mcastpeer [threads]
 ```
 

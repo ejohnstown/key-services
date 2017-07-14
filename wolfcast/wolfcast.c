@@ -31,6 +31,7 @@
     #define WOLFCAST_LOGGING_LEVEL 0
 #endif
 
+extern unsigned char gPeerId;
 
 #ifndef NETX
 
@@ -48,6 +49,7 @@
     #include <sys/socket.h>
     #include <sys/select.h>
     #include <fcntl.h>
+    #include <pthread.h>
 
     static unsigned int WCTIME(void)
     {
@@ -67,10 +69,9 @@
 #endif
 
     #define GROUP_ADDR "226.0.0.3"
-    #define GROUP_PORT 12345
 
     #ifndef LOCAL_ADDR
-        #define LOCAL_ADDR "192.168.0.111"
+        #error Please define LOCAL_ADDR with IP in dot notation
     #endif
 
 
@@ -138,7 +139,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
     if (!error) {
         si->tx.sin_family = AF_INET;
         si->tx.sin_addr.s_addr = inet_addr(GROUP_ADDR);
-        si->tx.sin_port = htons(GROUP_PORT);
+        si->tx.sin_port = htons(si->groupPort);
         si->txSz = sizeof(si->tx);
 
         si->txFd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -237,7 +238,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
         memset(&rxAddr, 0, sizeof(rxAddr));
         rxAddr.sin_family = AF_INET;
         rxAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        rxAddr.sin_port = htons(GROUP_PORT);
+        rxAddr.sin_port = htons(si->groupPort);
 
         if (bind(si->rxFd,
                  (struct sockaddr*)&rxAddr, sizeof(rxAddr)) != 0) {
@@ -286,7 +287,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     static unsigned int WCTIME(void)
     {
-        return (unsigned int)bsp_fast_timer_uptime() / 1000000;
+        return (unsigned int)(bsp_fast_timer_uptime() / 1000000);
     }
 
 #if WOLFCAST_LOGGING_LEVEL >= 3
@@ -302,9 +303,9 @@ CreateSockets(SocketInfo_t* si, int isClient)
 #endif
 
     #define GROUP_ADDR 0xE2000003
-    #define GROUP_PORT 12345
 
 extern UINT gGetNewKey;
+extern UINT gSwitchKeys[3];
 
 static int
 NetxDtlsTxCallback(
@@ -349,7 +350,7 @@ NetxDtlsTxCallback(
 
     if (!error) {
         ret = nx_udp_socket_send(&si->txSocket, pkt,
-                                 si->ipAddr, si->port);
+                                 si->ipAddr, si->groupPort);
         if (ret != NX_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -477,7 +478,6 @@ CreateSockets(SocketInfo_t* si, int isClient)
 
     if (!error) {
         si->ipAddr = GROUP_ADDR;
-        si->port = GROUP_PORT;
 #ifdef PGB000
         si->ip = &bsp_ip_system_bus;
         si->pool = &bsp_pool_system_bus;
@@ -566,7 +566,7 @@ CreateSockets(SocketInfo_t* si, int isClient)
     }
 
     if (!error) {
-        ret = nx_udp_socket_bind(&si->rxSocket, GROUP_PORT, NX_NO_WAIT);
+        ret = nx_udp_socket_bind(&si->rxSocket, si->groupPort, NX_NO_WAIT);
         if (ret != NX_SUCCESS) {
             error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -591,7 +591,10 @@ CreateSockets(SocketInfo_t* si, int isClient)
 #endif
 
 
+#ifndef NETX
 static int rekeyTrigger = 1;
+#endif
+
 const char seqHwCbCtx[] = "Callback context string.";
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
@@ -608,23 +611,11 @@ static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
     (void)ctx;
 #endif
 
-    rekeyTrigger = 1;
-
     return 0;
 }
 
 
 #define MSG_SIZE 80
-
-
-#ifdef WOLFSSL_STATIC_MEMORY
-    #if defined(NETX) && defined(PGB002)
-        #define MEMORY_SECTION LINK_SECTION(data_sdram)
-    #else
-        #define MEMORY_SECTION
-    #endif
-    MEMORY_SECTION unsigned char memory[WOLFLOCAL_STATIC_MEMORY_SZ];
-#endif
 
 
 /* WolfcastSessionNew
@@ -741,8 +732,11 @@ int
 WolfcastInit(
         int isClient,
         unsigned short myId,
+        unsigned short groupPort,
         WOLFSSL_CTX **ctx,
-        SocketInfo_t *si)
+        SocketInfo_t *si,
+        unsigned char* heap,
+        unsigned int heapSz)
 {
     int ret, error = 0;
 
@@ -778,6 +772,7 @@ WolfcastInit(
     }
 
     if (!error) {
+        si->groupPort = groupPort;
         error = CreateSockets(si, isClient);
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -820,7 +815,7 @@ WolfcastInit(
         if (method != NULL) {
             ret = wolfSSL_CTX_load_static_memory(
                     ctx, method,
-                    memory, sizeof(memory), 0, 2);
+                    heap, heapSz, 0, 2);
 
             if (ret != SSL_SUCCESS) {
                 error = 1;
@@ -867,13 +862,16 @@ WolfcastInit(
 
 #ifndef NO_WOLFCAST_CLIENT
 
+
+#ifndef NETX
+
 typedef struct EpochPeek {
     unsigned char pad[3];
     unsigned char epoch[2];
 } EpochPeek;
 
 
-static unsigned short GetEpoch_ex(const byte *buf)
+static unsigned short GetEpoch(const byte *buf)
 {
     unsigned short epoch = 0;
 
@@ -885,28 +883,8 @@ static unsigned short GetEpoch_ex(const byte *buf)
     return epoch;
 }
 
+#endif /* !NETX */
 
-#ifdef NETX
-static unsigned short GetEpoch(NX_PACKET *packet)
-{
-    unsigned char buf[sizeof(EpochPeek)];
-    ULONG bytesCopied;
-    UINT status;
-    unsigned short epoch = 0;
-
-    status = nx_packet_data_extract_offset(packet, 0,
-                                           buf, sizeof(buf),
-                                           &bytesCopied);
-
-    if (status == NX_SUCCESS && bytesCopied == sizeof(buf)) {
-        epoch = GetEpoch_ex(buf);
-    }
-
-    return epoch;
-}
-#else
-#define GetEpoch GetEpoch_ex
-#endif
 
 static inline unsigned int
 WolfcastClientUpdateTimeout(unsigned int curTime)
@@ -930,15 +908,13 @@ WolfcastClientInit(unsigned int *txtime, unsigned int *count)
 
 
 int
-WolfcastClient(SocketInfo_t *si,
-               WOLFSSL *curSsl, WOLFSSL *prevSsl,
-               unsigned short curEpoch, unsigned short myId,
+WolfcastClient(wolfWrapper_t *wrapper,
                unsigned int *txtime, unsigned int *count)
 {
     int error = 0;
     char msg[MSG_SIZE];
 
-    if (curSsl == NULL || txtime == NULL || count == NULL) {
+    if (wrapper == NULL || txtime == NULL || count == NULL) {
         /* prevSsl is allowed to be NULL, and is checked later. */
         error = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 1
@@ -946,68 +922,18 @@ WolfcastClient(SocketInfo_t *si,
 #endif
     }
 
-    if (!error) {
 #ifdef NETX
-        UINT status;
-        NX_PACKET *nxPacket = NULL;
-
-        status  = nx_udp_socket_receive(&si->rxSocket, &nxPacket, NX_NO_WAIT);
-        if (status == NX_SUCCESS) {
-            WOLFSSL *ssl = NULL;
-            unsigned short peerId;
-            unsigned short epoch;
-
-            epoch = GetEpoch(nxPacket);
-            si->rxPacket = nxPacket;
-            if (epoch == curEpoch)
-                ssl = curSsl;
-            else if (epoch < curEpoch)
-                ssl = prevSsl;
-            else if (epoch > curEpoch) {
-                rekeyTrigger = 1;
-                gGetNewKey = 1;
-            }
-
-            if (ssl != NULL) {
-                int n = wolfSSL_mcast_read(ssl, &peerId, msg, MSG_SIZE);
-                if (n < 0) {
-                    n = wolfSSL_get_error(ssl, n);
-                    if (n == VERIFY_MAC_ERROR || n == DECRYPT_ERROR) {
+    if (!error) {
+        USHORT peerId;
+        int n = wolfWrapper_Read(wrapper, &peerId, msg, MSG_SIZE);
+        if (n > 0) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
-                        WCPRINTF("Allowable DTLS error. Ignoring a message.\n");
+            WCPRINTF("msg from peer %u: %s\n", peerId, msg);
 #endif
-                    }
-                    else if (n != SSL_ERROR_WANT_READ) {
-                        error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                        WCERR(wolfSSL_ERR_reason_error_string(n));
-#endif
-                    }
-                }
-                else {
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                    WCPRINTF("got msg from peer %u %s\n", peerId, msg);
-#endif
-                }
-            }
-            else {
-#if WOLFCAST_LOGGING_LEVEL >= 3
-                WCPRINTF("Ignoring message unknown Epoch.\n");
-#endif
-            }
-
-            if (si->rxPacket != NULL) {
-                status = nx_packet_release(si->rxPacket);
-                if (status != NX_SUCCESS) {
-                    error = 1;
-#if WOLFCAST_LOGGING_LEVEL >= 1
-                    WCERR("couldn't release packet");
-#endif
-                }
-                si->rxPacket = NULL;
-            }
         }
+    }
 #else
+    if (!error) {
         byte packet[1500];
         ssize_t n;
 
@@ -1058,8 +984,8 @@ WolfcastClient(SocketInfo_t *si,
 #endif
             }
         }
-#endif
     }
+#endif
 
     if (!error) {
         unsigned int rxtime;
@@ -1069,13 +995,13 @@ WolfcastClient(SocketInfo_t *si,
             int msg_len;
             int n;
 
-            sprintf(msg, "%u sending message %d", myId, (*count)++);
+            sprintf(msg, "%u sending message %d", wrapper->myId, (*count)++);
             msg_len = (int)strlen(msg) + 1;
-            n = wolfSSL_write(curSsl, msg, msg_len);
+            n = wolfWrapper_Write(wrapper, msg, msg_len);
             if (n < 0) {
                 error = 1;
-                n = wolfSSL_get_error(curSsl, n);
 #if WOLFCAST_LOGGING_LEVEL >= 1
+                n = wolfSSL_get_error(wrapper->curSsl, n);
                 WCERR(wolfSSL_ERR_reason_error_string(n));
 #endif
             }
@@ -1132,8 +1058,54 @@ WolfcastServer(WOLFSSL *ssl)
 
 #ifndef NO_MAIN_DRIVER
 
+static int keySwapTrigger = 1;
 
 #define PEER_ID_LIST_SZ 99
+#define GROUP_PORT 12345
+
+
+    static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+    {
+        if (pkt) {
+            if (pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
+                /* trigger key change */
+                unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
+                rekeyTrigger = 1;
+
+                printf("Key Change Server: %d.%d.%d.%d\n",
+                    addr[0], addr[1], addr[2], addr[3]);
+            }
+            else if (pkt->header.type == CMD_PKT_TYPE_KEY_USE) {
+                /* use the new key */
+                unsigned char* epoch = pkt->msg.epochResp.epoch;
+                keySwapTrigger = 1;
+
+                printf("Use the new key for epoch %u.\n",
+                    ((epoch[0] << 8)|(epoch[1])));
+            }
+        }
+    }
+
+    static void* KeyBcastThread(void* arg)
+    {
+        int ret;
+        struct in_addr srvAddr;
+        unsigned char addr[4] = {KEY_BCAST_ADDR};
+
+        (void)arg;
+
+        XMEMCPY(&srvAddr.s_addr, addr, sizeof(srvAddr.s_addr));
+
+        ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, NULL);
+
+        if (ret) {
+#if WOLFCAST_LOGGING_LEVEL >= 1
+            WCPRINTF("error: KeyBcast_RunUdb returned %d\n", ret);
+#endif
+        }
+
+        return NULL;
+    }
 
 int
 main(
@@ -1143,7 +1115,7 @@ main(
     int error = 0;
     int ret;
     int isClient = 0;
-    unsigned short myId;
+    unsigned short myId = 0;
     unsigned short peerIdList[PEER_ID_LIST_SZ];
     unsigned int peerIdListSz = 0;
     SocketInfo_t si;
@@ -1152,6 +1124,12 @@ main(
     WOLFSSL *prevSsl = NULL;
     unsigned short epoch = 0;
     struct in_addr keySrvAddr;
+    pthread_t tid;
+#ifdef WOLFSSL_STATIC_MEMORY
+    unsigned char memory[WOLFLOCAL_STATIC_MEMORY_SZ];
+#endif
+
+
 
     memset(&keySrvAddr, 0, sizeof(keySrvAddr));
 
@@ -1229,8 +1207,11 @@ main(
 #endif
     }
 
+    gPeerId = myId;
+
     if (!error) {
-        error = WolfcastInit(isClient, myId, &ctx, &si);
+        error = WolfcastInit(isClient, myId, GROUP_PORT, &ctx, &si, memory,
+                sizeof(memory));
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("Couldn't initialize wolfCast.");
@@ -1245,19 +1226,25 @@ main(
     if (isClient) {
 #ifndef NO_WOLFCAST_CLIENT
         unsigned int txtime, count;
+        KeyRespPacket_t keyResp;
+        unsigned short newEpoch;
 
         if (!error)
             error = WolfcastClientInit(&txtime, &count);
+
+        /* spin up another thread for UDP broadcast */
+        ret = pthread_create(&tid, NULL, KeyBcastThread, NULL);
+        if (ret < 0) {
+            printf("Pthread create failed for UDP\n");
+            error = 1;
+        }
+        pthread_detach(tid);
 
         while (!error) {
             fd_set readfds;
             struct timeval timeout = {0, 500000};
 
             if (rekeyTrigger) {
-                WOLFSSL *newSsl;
-                KeyRespPacket_t keyResp;
-                unsigned short newEpoch;
-
                 if (!error) {
                     unsigned char addr[4] = {KEY_BCAST_ADDR};
                     memcpy(&keySrvAddr.s_addr, addr, sizeof(addr));
@@ -1287,6 +1274,7 @@ main(
 #endif
                         goto skipRekey;
                     }
+                    rekeyTrigger = 0;
                 }
 
                 if (!error) {
@@ -1300,10 +1288,13 @@ main(
 #if WOLFCAST_LOGGING_LEVEL >= 3
                         WCPRINTF("Ignoring already used epoch.\n");
 #endif
-                        rekeyTrigger = 0;
                         goto skipRekey;
                     }
                 }
+            }
+
+            if (keySwapTrigger) {
+                WOLFSSL *newSsl;
 
                 if (prevSsl != NULL) {
 #if WOLFCAST_LOGGING_LEVEL >= 3
@@ -1327,8 +1318,8 @@ main(
                 if (!error) {
                     ret = wolfSSL_set_secret(newSsl, newEpoch,
                                              keyResp.pms, sizeof(keyResp.pms),
-                                             keyResp.clientRandom,
-                                             keyResp.serverRandom,
+                                             keyResp.clientRandom[0],
+                                             keyResp.serverRandom[0],
                                              keyResp.suite);
                     if (ret != SSL_SUCCESS) {
                         error = 1;
@@ -1348,9 +1339,10 @@ main(
                 }
 
                 rekeyTrigger = 0;
-skipRekey:
+                keySwapTrigger = 0;
                 memset(&keyResp, 0, sizeof(keyResp));
             }
+skipRekey:
 
             if (curSsl != NULL) {
                 FD_ZERO(&readfds);
@@ -1423,7 +1415,8 @@ skipRekey:
                 newEpoch = (keyResp.epoch[0] << 8) | keyResp.epoch[1];
                 ret = wolfSSL_set_secret(newSsl, newEpoch,
                                 keyResp.pms, sizeof(keyResp.pms),
-                                keyResp.clientRandom, keyResp.serverRandom,
+                                keyResp.clientRandom[0],
+                                keyResp.serverRandom[0],
                                 keyResp.suite);
                 if (ret != SSL_SUCCESS) {
                     error = 1;

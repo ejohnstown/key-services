@@ -32,6 +32,7 @@
         #include "pgb002_ap2.h"
     #endif
 
+    #define KS_ANY_PORT        NX_ANY_PORT
     #define KS_SOCKET_T        NX_TCP_SOCKET*
     #define KS_SOCKET_T_INIT   NULL
 
@@ -71,6 +72,7 @@
     #include <unistd.h>
     #include <fcntl.h>
 
+    #define KS_ANY_PORT        0
     #define KS_SOCKET_T        int
     #define KS_SOCKET_T_INIT   -1
 
@@ -112,6 +114,7 @@ int  KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags);
 int  KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags, struct sockaddr *addr, socklen_t *addrSz);
 int  KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags, struct sockaddr *addr, socklen_t addrSz);
 void KeySocket_Unlisten(const unsigned short srvPort);
+void KeySocket_Unaccept(KS_SOCKET_T sockfd);
 void KeySocket_Unbind(KS_SOCKET_T sockfd);
 void KeySocket_Close(KS_SOCKET_T* pSockfd);
 void KeySocket_CloseUdp(KS_SOCKET_T* pSockfd);

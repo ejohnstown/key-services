@@ -31,6 +31,7 @@
 #define BIG_ENDIAN_ORDER
 #define USER_TICKS
 #define WOLFSSL_DTLS_ALLOW_FUTURE
+#define WOLFSSL_DTLS_DROP_STATS
 
 #define THREADX
 #define HAVE_THREADX
@@ -42,18 +43,20 @@
 #define NO_MAIN_DRIVER
 #define BENCH_EMBEDDED
 
-#define LOCAL_ADDR "192.168.2.2"
-#define KEY_SERV_LOCAL_ADDR 192,168,2,2
-#define KEY_BCAST_ADDR 192,168,2,255
-
-#if 0
 #define KEY_SOCKET_LOGGING_LEVEL 3
 #define KEY_SERVICE_LOGGING_LEVEL 3
 #define WOLFCAST_LOGGING_LEVEL 3
+#define WOLFLOCAL_LOGGING_LEVEL 3
+#if 0
 #define DEBUG_WOLFSSL
 #define WOLFSSL_DEBUG_MEMORY
 #endif
-#define WOLFCAST_LOGGING_LEVEL 3
+
+#ifdef PGB000
+    #define WOLFLOCAL_TEST_KEY_SERVER
+#else /* PGB000/PGB002 */
+    /*#define WOLFLOCAL_TEST_KEY_REQUEST*/
+#endif /* PGB002 */
 
 #define WOLFSSL_MAX_MTU 256
 #define WOLFMEM_BUCKETS 64,128,256,384,1024,4544
@@ -63,6 +66,7 @@
  * by the function wolfSSL_StaticBufferSz(). */
 #define WOLFLOCAL_STATIC_MEMORY_SZ 25424
 
+#define KEY_SOCKET_RECVFROM_TIMEOUT 50
 
 int mySeed(unsigned char* output, unsigned int sz);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)
