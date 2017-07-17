@@ -53,7 +53,7 @@
 #endif
 
 #ifdef PGB000
-    #define WOLFLOCAL_TEST_KEY_SERVER
+    /* #define WOLFLOCAL_FIND_MASTER */
 #else /* PGB000/PGB002 */
     /*#define WOLFLOCAL_TEST_KEY_REQUEST*/
 #endif /* PGB002 */

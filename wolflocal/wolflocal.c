@@ -695,21 +695,22 @@ void WolfLocalTimer(void)
             }
         }
 
-	if ((count % (WOLFLOCAL_FIND_MASTER_PERIOD * 12)) == 0) {
+        if ((count % (WOLFLOCAL_FIND_MASTER_PERIOD * 12)) == 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
-            unsigned int ks, mac, replay, i;
+                unsigned int ks, mac, replay, i;
 
-            ks = KeyServer_GetAuthFailCount();
-            KS_PRINTF("Key Server auth fail counts: %u\n", ks);
+                ks = KeyServer_GetAuthFailCount();
+                KS_PRINTF("Key Server auth fail counts: %u\n", ks);
 
-            for (i = 0; i < 3; i++) {
-                wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay);
-                KS_PRINTF("Wrapper[%u] macFail: %u\n           replayCount: %u\n",
-                          i, mac, replay);
-            }
+                for (i = 0; i < 3; i++) {
+                    wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay);
+                    KS_PRINTF("Wrapper[%u] macFail: %u\n           replayCount: %u\n",
+                              i, mac, replay);
+                }
 #endif
-	}
+        }
 
+#ifdef WOLFLOCAL_FIND_MASTER
         if ((count % WOLFLOCAL_FIND_MASTER_PERIOD) == 3) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: %u on the 3\n", WOLFLOCAL_FIND_MASTER_PERIOD);
@@ -717,7 +718,7 @@ void WolfLocalTimer(void)
             if (!KeyServer_IsRunning()) {
                 struct in_addr scratch;
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("finding the master\n");
+                KS_PRINTF("finding the master\n");
 #endif
                 ret = KeyClient_FindMaster(&scratch, gHeapHint);
                 if (ret != 0) {
@@ -728,6 +729,7 @@ void WolfLocalTimer(void)
                 }
             }
         }
+#endif
     }
 }
 
