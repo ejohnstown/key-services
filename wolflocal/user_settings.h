@@ -60,7 +60,7 @@
  * by the function wolfSSL_StaticBufferSz(). */
 #define WOLFLOCAL_STATIC_MEMORY_SZ 25424
 
-#define KEY_SOCKET_RECVFROM_TIMEOUT 50
+#define KEY_SOCKET_RECVFROM_TIMEOUT 300
 
 int mySeed(unsigned char* output, unsigned int sz);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)
