@@ -98,10 +98,42 @@ typedef struct wolfWrapper_t {
 
 static int gRekeyTrigger = 1;
 static int gKeySet[3];
-static int gSwitchKeys[3] = {1, 1, 1};
+static int gSwitchKeys[3];
 static KeyRespPacket_t gKeyState;
 static wolfWrapper_t gWrapper[3];
 static unsigned short gEpoch;
+
+
+static int
+WrapperDtlsTxCallback(
+    WOLFSSL *ssl,
+    char *buf, int sz,
+    void *ctx)
+{
+    wolfWrapper_t* wrapper;
+    int error = 0;
+    int sendSz = 0;
+
+    (void)ssl;
+
+    if (ctx == NULL || buf == NULL || sz <= 0) {
+        error = 1;
+#if WOLFCAST_LOGGING_LEVEL >= 1
+        WCERR("receive callback invalid parameters");
+#endif
+    }
+
+    if (!error)
+        wrapper = (wolfWrapper_t*)ctx;
+
+    sendSz = (int)sendto(wrapper->txFd, buf, sz, 0,
+                         (struct sockaddr*)&wrapper->tx, wrapper->txSz);
+
+    if (sendSz != sz) {
+    }
+
+    return sz;
+}
 
 
 static int
@@ -170,8 +202,6 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, int isClient,
     if (wrapper == NULL ||
         (isClient && (peerIdList == NULL || peerIdListSz == 0)) ||
         groupAddr == NULL || groupPort == 0) {
-
-
 #if WOLFCAST_LOGGING_LEVEL >= 1
         WCERR("wolfWrapper_Init bad arguments");
 #endif
@@ -203,6 +233,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, int isClient,
         goto exit;
     }
 
+    wolfSSL_SetIOSend(wrapper->ctx, WrapperDtlsTxCallback);
     wolfSSL_SetIORecv(wrapper->ctx, BufferDtlsRxCallback);
     ret = wolfSSL_CTX_mcast_set_member_id(wrapper->ctx, myId);
     if (ret != SSL_SUCCESS) {
@@ -378,6 +409,10 @@ static int wolfWrapper_Read(wolfWrapper_t* wrapper, unsigned short* peerId,
     byte packet[1500];
     ssize_t n;
 
+#if WOLFCAST_LOGGING_LEVEL >= 3
+    WCPRINTF("Entering wolfWrapper_Read\n");
+#endif
+
     if (wrapper == NULL || buf == NULL || sz == 0)
         goto exit;
 
@@ -423,6 +458,9 @@ static int wolfWrapper_Read(wolfWrapper_t* wrapper, unsigned short* peerId,
 exit:
     wrapper->rxPacket = NULL;
 
+#if WOLFCAST_LOGGING_LEVEL >= 3
+    WCPRINTF("Leaving wolfWrapper_Read, ret = %d\n", recvSz);
+#endif
     return recvSz;
 }
 
@@ -450,7 +488,7 @@ static int wolfWrapper_Write(wolfWrapper_t* wrapper, const void* buf, int sz)
 
 exit:
 #if WOLFCAST_LOGGING_LEVEL >= 3
-    WCPRINTF("Entering wolfWrapper_Write, ret = %d\n", sentSz);
+    WCPRINTF("Leaving wolfWrapper_Write, ret = %d\n", sentSz);
 #endif
     return sentSz;
 }
@@ -518,7 +556,6 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
 #if WOLFCAST_LOGGING_LEVEL >= 3
     WCPRINTF("Entering wolfWrapper_Update\n");
 #endif
-
     if (wrapper == NULL) {
         error = 1;
         goto exit;
@@ -612,16 +649,15 @@ exit:
 
 #else /* NETX */
 
+    #include "wolflocal/wolflocal.h"
+
     static unsigned int WCTIME(void)
     {
         return (unsigned int)(bsp_fast_timer_uptime() / 1000000);
     }
 
-#if WOLFCAST_LOGGING_LEVEL >= 3
-    #define WCPRINTF bsp_debug_printf
-#endif
-
 #if WOLFCAST_LOGGING_LEVEL >= 1
+    #define WCPRINTF bsp_debug_printf
     static void WCERR(const char *msg)
     {
         if (msg != NULL)
@@ -676,6 +712,10 @@ WolfcastClient(wolfWrapper_t *wrapper,
     int error = 0;
     char msg[MSG_SIZE];
 
+#if WOLFCAST_LOGGING_LEVEL >= 3
+    WCPRINTF("Entering WolfcastClient\n");
+#endif
+
     if (wrapper == NULL || txtime == NULL || count == NULL) {
         /* prevSsl is allowed to be NULL, and is checked later. */
         error = 1;
@@ -717,6 +757,9 @@ WolfcastClient(wolfWrapper_t *wrapper,
         }
     }
 
+#if WOLFCAST_LOGGING_LEVEL >= 3
+    WCPRINTF("Leaving WolfcastClient, ret = %d\n", error);
+#endif
     return error;
 }
 
@@ -730,8 +773,8 @@ WolfcastServer(wolfWrapper_t *wrapper)
 {
     int error = 0;
 
-#if WOLFCAST_LOGGING_LEVEL >= 1
-        WCPRINTF("Entering WolfcastServer\n");
+#if WOLFCAST_LOGGING_LEVEL >= 3
+    WCPRINTF("Entering WolfcastServer\n");
 #endif
 
     if (wrapper == NULL) {
@@ -758,8 +801,8 @@ WolfcastServer(wolfWrapper_t *wrapper)
         }
     }
 
-#if WOLFCAST_LOGGING_LEVEL >= 1
-        WCPRINTF("Leaving WolfcastServer, ret = %d\n", error);
+#if WOLFCAST_LOGGING_LEVEL >= 3
+    WCPRINTF("Leaving WolfcastServer, ret = %d\n", error);
 #endif
     return error;
 }
@@ -780,7 +823,6 @@ WolfcastServer(wolfWrapper_t *wrapper)
                 /* trigger key change */
                 unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
                 gRekeyTrigger = 1;
-
 #if WOLFCAST_LOGGING_LEVEL >= 3
                 WCPRINTF("Key Change Server: %d.%d.%d.%d\n",
                          addr[0], addr[1], addr[2], addr[3]);
@@ -794,7 +836,6 @@ WolfcastServer(wolfWrapper_t *wrapper)
                 gSwitchKeys[1] = epoch;
                 gSwitchKeys[2] = epoch;
                 gEpoch = epoch;
-
 #if WOLFCAST_LOGGING_LEVEL >= 3
                 WCPRINTF("Use the new key for epoch %u.\n", epoch);
 #endif
@@ -836,6 +877,11 @@ static void* WolfCastClientThread(void* arg)
     if (wrapper == NULL)
         error = 1;
 
+    while (!gKeySet[wrapper->streamId]) {
+        WCPRINTF("Waiting for the first key.\n");
+        sleep(1);
+    }
+
     if (!error)
         error = WolfcastClientInit(&txtime, &count);
 
@@ -874,6 +920,13 @@ static void* WolfCastServerThread(void* arg)
 
     if (wrapper == NULL)
         error = 1;
+
+    while (!gKeySet[wrapper->streamId]) {
+        WCPRINTF("Waiting for the first key.\n");
+        sleep(1);
+    }
+    gSwitchKeys[wrapper->streamId] = (gKeyState.epoch[0] << 8) |
+                                     gKeyState.epoch[1];
 
     while (!error) {
         error = wolfWrapper_Update(wrapper);
@@ -1043,9 +1096,7 @@ main(
 
     if (!error) {
         signal(SIGPIPE, SIG_IGN);
-    }
 
-    if (!error) {
         gPeerId = myId;
         error = KeyServer_Init(NULL, &keySrvAddr, 22222, 11111);
         if (error) {
