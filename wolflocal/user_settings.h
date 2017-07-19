@@ -52,12 +52,6 @@
 #define WOLFSSL_DEBUG_MEMORY
 #endif
 
-#ifdef PGB000
-    /* #define WOLFLOCAL_FIND_MASTER */
-#else /* PGB000/PGB002 */
-    /*#define WOLFLOCAL_TEST_KEY_REQUEST*/
-#endif /* PGB002 */
-
 #define WOLFSSL_MAX_MTU 256
 #define WOLFMEM_BUCKETS 64,128,256,384,1024,4544
 #define WOLFMEM_DIST 14,4,6,8,4,4

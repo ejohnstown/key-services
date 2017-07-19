@@ -396,12 +396,15 @@ KeyClientEntry(ULONG ignore)
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Key server didn't announce itself.\n");
 #endif
+#if 0
 #if WOLFLOCAL_LOGGING_LEVEL >= 2
                 KS_PRINTF("Taking over as key server.\n");
 #endif
                 KeyServer_Resume();
+#endif
             }
-            findMaster = 0;
+            else
+                findMaster = 0;
         }
 
         if (!findMaster && requestRekey && !storeKey) {
@@ -530,6 +533,9 @@ WolfLocalInit(void)
 #endif
 
     gPeerId = CLIENT_ID;
+#ifdef PGB002
+    KeyServer_Resume();
+#endif
 
     if (KeySocket_Init() != 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
@@ -710,7 +716,7 @@ void WolfLocalTimer(void)
 #endif
         }
 
-#ifdef WOLFLOCAL_FIND_MASTER
+#if 0
         if ((count % WOLFLOCAL_FIND_MASTER_PERIOD) == 3) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
             KS_PRINTF("timer: %u on the 3\n", WOLFLOCAL_FIND_MASTER_PERIOD);
