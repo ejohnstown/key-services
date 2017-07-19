@@ -947,7 +947,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     ULONG addr = 0, mask = 0;
 #else
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
-    struct timeval to = {0, 500000};
+    struct timeval to = {1, 0};
 #endif
     struct sockaddr_in clientAddr;
     socklen_t clientAddrLen = sizeof(clientAddr);
