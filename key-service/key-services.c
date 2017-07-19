@@ -956,7 +956,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     if (gKeyBcastPort == 0) {
         ret = -1;
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("KeyClient_NetUdpBcast Error: broadcast port not set\n", ret);
+        printf("KeyClient_NetUdpBcast Error: broadcast port not set\n");
 #endif
     }
 
