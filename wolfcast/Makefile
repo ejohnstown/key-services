@@ -1,6 +1,6 @@
 LIB_PATH=/usr/local
 CFLAGS=-Wall -I$(LIB_PATH)/include -I. -I../key-service
-LDFLAGS=
+LDFLAGS=-lpthread
 
 # IP Addresses
 CFLAGS+=-DLOCAL_ADDR=\"192.168.20.1\" -DKEY_SERV_LOCAL_ADDR="192,168,20.1" -DKEY_BCAST_ADDR="192,168,20,255"

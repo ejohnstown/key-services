@@ -123,16 +123,24 @@ WrapperDtlsTxCallback(
 #endif
     }
 
-    if (!error)
+    if (!error) {
         wrapper = (wolfWrapper_t*)ctx;
-
-    sendSz = (int)sendto(wrapper->txFd, buf, sz, 0,
-                         (struct sockaddr*)&wrapper->tx, wrapper->txSz);
-
-    if (sendSz != sz) {
+        sendSz = (int)sendto(wrapper->txFd, buf, sz, 0,
+                             (struct sockaddr*)&wrapper->tx, wrapper->txSz);
     }
 
-    return sz;
+    if (sendSz < 0) {
+        sendSz = errno;
+
+        if (sendSz == SOCKET_EWOULDBLOCK || sendSz == SOCKET_EAGAIN) {
+            sendSz = WOLFSSL_CBIO_ERR_WANT_WRITE;
+        }
+        else {
+            sendSz = WOLFSSL_CBIO_ERR_GENERAL;
+        }
+    }
+
+    return sendSz;
 }
 
 
@@ -820,13 +828,13 @@ WolfcastServer(wolfWrapper_t *wrapper)
     {
         if (pkt) {
             if (pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
-                /* trigger key change */
-                unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
-                gRekeyTrigger = 1;
 #if WOLFCAST_LOGGING_LEVEL >= 3
+                unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
                 WCPRINTF("Key Change Server: %d.%d.%d.%d\n",
                          addr[0], addr[1], addr[2], addr[3]);
 #endif
+                /* trigger key change */
+                gRekeyTrigger = 1;
             }
             else if (pkt->header.type == CMD_PKT_TYPE_KEY_USE) {
                 /* use the new key */
@@ -878,7 +886,9 @@ static void* WolfCastClientThread(void* arg)
         error = 1;
 
     while (!gKeySet[wrapper->streamId]) {
+#if WOLFCAST_LOGGING_LEVEL >= 2
         WCPRINTF("Waiting for the first key.\n");
+#endif
         sleep(1);
     }
 
@@ -922,7 +932,9 @@ static void* WolfCastServerThread(void* arg)
         error = 1;
 
     while (!gKeySet[wrapper->streamId]) {
+#if WOLFCAST_LOGGING_LEVEL >= 2
         WCPRINTF("Waiting for the first key.\n");
+#endif
         sleep(1);
     }
     gSwitchKeys[wrapper->streamId] = (gKeyState.epoch[0] << 8) |
