@@ -649,7 +649,7 @@ exit:
 
 #else /* NETX */
 
-    #include "wolflocal/wolflocal.h"
+    #include "wolflocal.h"
 
     static unsigned int WCTIME(void)
     {
