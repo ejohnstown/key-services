@@ -43,6 +43,7 @@ int wolfWrapper_Init(wolfWrapper_t*, UINT, UCHAR, USHORT, ULONG,
 int wolfWrapper_Update(wolfWrapper_t*);
 int wolfWrapper_Write(wolfWrapper_t*, const void*, int);
 int wolfWrapper_Read(wolfWrapper_t*, USHORT*, void*, int);
-int wolfWrapper_GetErrorStats(wolfWrapper_t*, unsigned int*, unsigned int*);
+int wolfWrapper_GetErrorStats(wolfWrapper_t*, unsigned int*,
+                              unsigned int*, unsigned int*);
 
 #endif

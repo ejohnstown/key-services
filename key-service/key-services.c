@@ -574,7 +574,7 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
 
             /* set connection context */
         #ifdef HAVE_NETX
-            wolfSSL_SetIO_NetX(ssl, connfd, NX_WAIT_FOREVER);
+            wolfSSL_SetIO_NetX(ssl, connfd, KEY_SERVICE_RECV_TIMEOUT);
         #else
             ret = wolfSSL_set_fd(ssl, connfd);
             if (ret != SSL_SUCCESS)
@@ -901,7 +901,7 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
 
     /* associate the file descriptor with the session */
 #ifdef HAVE_NETX
-    wolfSSL_SetIO_NetX(ssl, sockfd, NX_WAIT_FOREVER);
+    wolfSSL_SetIO_NetX(ssl, sockfd, KEY_SERVICE_RECV_TIMEOUT);
 #else
     ret = wolfSSL_set_fd(ssl, sockfd);
     if (ret != SSL_SUCCESS)

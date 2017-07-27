@@ -129,6 +129,7 @@ static struct in_addr gKeySrvAddr = { 0 };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
 wolfWrapper_t gWrappers[3];
+static UINT gEpochDropCount = 0;
 ULONG gAddr = 0;
 ULONG gMask = 0;
 
@@ -703,15 +704,17 @@ void WolfLocalTimer(void)
 
         if ((count % (WOLFLOCAL_FIND_MASTER_PERIOD * 12)) == 0) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
-                unsigned int ks, mac, replay, i;
+                unsigned int ks, mac, replay, epoch, i;
 
                 ks = KeyServer_GetAuthFailCount();
                 KS_PRINTF("Key Server auth fail counts: %u\n", ks);
 
                 for (i = 0; i < 3; i++) {
-                    wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay);
-                    KS_PRINTF("Wrapper[%u] macFail: %u\n           replayCount: %u\n",
-                              i, mac, replay);
+                    wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
+                    KS_PRINTF("Wrapper[%u] macFail: %u\n"
+                              "            replayCount: %u\n"
+                              "            epochDrop: %u\n",
+                              i, mac, replay, epoch);
                 }
 #endif
         }
@@ -1283,6 +1286,7 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Ignoring message unknown Epoch.\n");
 #endif
+        gEpochDropCount++;
         goto exit;
     }
 
@@ -1320,7 +1324,8 @@ exit:
 
 int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
                               unsigned int* macDropCount,
-                              unsigned int* replayDropCount)
+                              unsigned int* replayDropCount,
+                              unsigned int* epochDropCount)
 {
     unsigned int macCount = 0, replayCount = 0;
     int ret = 0;
@@ -1347,6 +1352,8 @@ int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
         *macDropCount = macCount;
     if (replayDropCount != NULL)
         *replayDropCount = replayCount;
+    if (epochDropCount != NULL)
+        *epochDropCount = gEpochDropCount;
 
     return ret;
 }
