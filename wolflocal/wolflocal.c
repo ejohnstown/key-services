@@ -129,7 +129,6 @@ static struct in_addr gKeySrvAddr = { 0 };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
 wolfWrapper_t gWrappers[3];
-static UINT gEpochDropCount = 0;
 ULONG gAddr = 0;
 ULONG gMask = 0;
 
@@ -1172,9 +1171,15 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
             memset(&wrapper->keyState, 0, sizeof(wrapper->keyState));
 
             if (wrapper->prevSsl != NULL) {
+                unsigned int macCount = 0, replayCount = 0;
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("Releasing old session.\n");
 #endif
+
+                wolfSSL_dtls_get_drop_stats(wrapper->prevSsl,
+                                            &macCount, &replayCount);
+                wrapper->macDropCount += macCount;
+                wrapper->replayDropCount += replayCount;
                 wolfSSL_free(wrapper->prevSsl);
             }
             wrapper->prevSsl = wrapper->curSsl;
@@ -1286,7 +1291,7 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
         KS_PRINTF("Ignoring message unknown Epoch.\n");
 #endif
-        gEpochDropCount++;
+        wrapper->epochDropCount++;
         goto exit;
     }
 
@@ -1328,11 +1333,15 @@ int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
                               unsigned int* epochDropCount)
 {
     unsigned int macCount = 0, replayCount = 0;
+    unsigned int prevMacCount = 0, prevReplayCount = 0;
     int ret = 0;
 
     if (wrapper != NULL) {
         ret = wolfSSL_dtls_get_drop_stats(wrapper->curSsl,
                                           &macCount, &replayCount);
+        if (ret == SSL_SUCCESS)
+            ret = wolfSSL_dtls_get_drop_stats(wrapper->prevSsl,
+                                              &prevMacCount, &prevReplayCount);
         if (ret != SSL_SUCCESS) {
             ret = 1;
 #if WOLFLOCAL_LOGGING_LEVEL >= 2
@@ -1349,11 +1358,13 @@ int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
     }
 
     if (macDropCount != NULL)
-        *macDropCount = macCount;
+        *macDropCount = macCount + prevMacCount +
+                        wrapper->macDropCount;
     if (replayDropCount != NULL)
-        *replayDropCount = replayCount;
+        *replayDropCount = replayCount + prevReplayCount +
+                           wrapper->replayDropCount;
     if (epochDropCount != NULL)
-        *epochDropCount = gEpochDropCount;
+        *epochDropCount = wrapper->epochDropCount;
 
     return ret;
 }

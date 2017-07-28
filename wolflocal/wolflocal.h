@@ -28,6 +28,9 @@ typedef struct wolfWrapper_t {
     unsigned char myId;
     ULONG groupAddr;
     unsigned short groupPort;
+    UINT macDropCount;
+    UINT replayDropCount;
+    UINT epochDropCount;
     KS_SOCKET_T txSocket;
     KS_SOCKET_T rxSocket;
     NX_UDP_SOCKET realTxSocket;
