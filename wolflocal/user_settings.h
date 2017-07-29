@@ -38,6 +38,7 @@
 #undef HAVE_NETX
 #define HAVE_NETX
 #define NEED_THREADX_TYPES
+#define THREADX_NO_DC_PRINTF
 
 /* For wolftest, benchmark, and wolfcast */
 #define NO_MAIN_DRIVER
@@ -50,6 +51,8 @@
 #if 0
 #define DEBUG_WOLFSSL
 #define WOLFSSL_DEBUG_MEMORY
+/* Enabling WOLFSSL_DEBUG_MEMORY requires modifying the file memory.c. It
+ * calls printf() directly, and if you don't have it you'll get an error. */
 #endif
 
 #define WOLFSSL_MAX_MTU 256

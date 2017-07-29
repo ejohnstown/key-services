@@ -512,6 +512,18 @@ WolfCastClientEntry(ULONG streamId)
 }
 
 
+#ifdef DEBUG_WOLFSSL
+/* WolfLocalLog
+ * Logging callback function that is passed to wolfSSL if debugging is
+ * enabled in the build. */
+static void WolfLocalLog(const int logLevel, const char *const logMessage)
+{
+    (void)logLevel;
+    bsp_debug_printf("%s\n", logMessage);
+}
+#endif
+
+
 /* WolfLocalInit
  * Runs the wolfCrypt test and benchmark. Sets up the mutex for the
  * group key access. Creates threads for the Key Server, Key Client,
@@ -535,6 +547,10 @@ WolfLocalInit(void)
     gPeerId = CLIENT_ID;
 #ifdef PGB002
     KeyServer_Resume();
+#endif
+
+#ifdef DEBUG_WOLFSSL
+    wolfSSL_SetLoggingCb(WolfLocalLog);
 #endif
 
     if (KeySocket_Init() != 0) {
