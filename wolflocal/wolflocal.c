@@ -128,6 +128,7 @@ static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
+static UINT gUseKeyCount = 0;
 wolfWrapper_t gWrappers[3];
 ULONG gAddr = 0;
 ULONG gMask = 0;
@@ -690,11 +691,18 @@ void WolfLocalTimer(void)
          * switch the keys. */
         if (gSwitchKeyCount) {
             gSwitchKeyCount--;
-            if (gSwitchKeyCount == 0) {
+            if (gSwitchKeyCount != 0) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 3
+                KS_PRINTF("timer: reannouncing the new key\n");
+#endif
+                KeyServer_NewKeyChange(gHeapHint);
+            }
+            else {
 #if WOLFLOCAL_LOGGING_LEVEL >= 3
                 KS_PRINTF("timer: 15 seconds later\n");
 #endif
                 if (KeyServer_IsRunning()) {
+                    gUseKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
                     ret = KeyServer_NewKeyUse(gHeapHint);
                     if (ret) {
 #if WOLFLOCAL_LOGGING_LEVEL >= 1
@@ -713,6 +721,18 @@ void WolfLocalTimer(void)
                             tx_mutex_put(&gKeyStateMutex);
                         }
                     }
+                }
+            }
+        }
+
+        if (gUseKeyCount) {
+            gUseKeyCount--;
+            if (gUseKeyCount != 0) {
+                ret = KeyServer_NewKeyUse(gHeapHint);
+                if (ret) {
+#if WOLFLOCAL_LOGGING_LEVEL >= 1
+                    KS_PRINTF("Failed to announce key switch.\n");
+#endif
                 }
             }
         }
