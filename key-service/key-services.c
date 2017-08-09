@@ -587,7 +587,10 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap)
                 printf("Error: wolfSSL_accept\n");
             #endif
                 ret = wolfSSL_get_error(ssl, ret);
-                if (ret == DECRYPT_ERROR)
+                /* Checking for DECRYPT_ERROR indicates if the wrong PSK
+                 * was used. Checking for PSK_KEY_ERROR indicates if an
+                 * invalid client identity is sent to the server. */
+                if (ret == DECRYPT_ERROR || ret == PSK_KEY_ERROR)
                     gAuthFailCount++;
                 goto cleanup;
             }
