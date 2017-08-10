@@ -1,9 +1,5 @@
 #include "types.h"
 #include "wolflocal.h"
-#if 0
-#include "benchmark.h"
-#include "wolftest.h"
-#endif
 #include "key-services.h"
 #include "wolfcast.h"
 #include <wolfssl/error-ssl.h>
@@ -41,7 +37,28 @@ unsigned int LowResTimer(void)
     #define WOLFLOCAL_LOGGING_LEVEL 0
 #endif
 
-#define KS_PRINTF bsp_debug_printf
+#include <stdarg.h>
+
+/* Filter the logging with bsp_debug_printf based on the provided
+ * level value and the WOLFLOCAL_LOGGING_LEVEL constant. */
+static void FilteredLog(int level, const char* fmt, ...)
+{
+    va_list args;
+    char output[100];
+
+    va_start(args, fmt);
+    vsnprintf(output, sizeof(output), fmt, args);
+    va_end(args);
+
+    if (level >= WOLFLOCAL_LOGGING_LEVEL)
+        bsp_debug_printf("%s", output);
+}
+
+#if WOLFLOCAL_LOGGING_LEVEL > 0
+    #define WOLFLOCAL_LOG(...) do { if (1) FilteredLog(__VA_ARGS__); } while (0)
+#else
+    #define WOLFLOCAL_LOG(...) do { if (0) FilteredLog(__VA_ARGS__); } while (0)
+#endif
 
 #define KS_MEMORY_POOL_SZ 4096
 #define KS_STACK_SZ 4096
@@ -217,22 +234,16 @@ KeyServerEntry(ULONG ignore)
     (void)ignore;
 
     if (wolfSSL_Init() != SSL_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("KeyServer couldn't initialize wolfSSL.\n");
-#endif
+        WOLFLOCAL_LOG(1, "KeyServer couldn't initialize wolfSSL.\n");
     }
 
     while (!isAddrSet()) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("Key server waiting for network.\n");
-#endif
+        WOLFLOCAL_LOG(3, "Key server waiting for network.\n");
         tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     while (gHeapHint == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("KeyServer waiting for heap.\n");
-#endif
+        WOLFLOCAL_LOG(2, "KeyServer waiting for heap.\n");
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
@@ -242,17 +253,13 @@ KeyServerEntry(ULONG ignore)
         result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
     }
     if (result != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("KeyServer couldn't initialize. (%d)\n", result);
-#endif
+        WOLFLOCAL_LOG(1, "KeyServer couldn't initialize. (%d)\n", result);
     }
 
     if (result == 0) {
         result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-            KS_PRINTF("KeyServer terminated. (%d)\n", result);
-#endif
+            WOLFLOCAL_LOG(2, "KeyServer terminated. (%d)\n", result);
         }
     }
 
@@ -268,9 +275,7 @@ broadcastCb(CmdPacket_t* pkt)
     unsigned short epoch;
 
     if (KeyServer_IsRunning()) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("I am the key server, I should ignore my broadcasts.\n");
-#endif
+        WOLFLOCAL_LOG(3, "I am the key server, I should ignore my broadcasts.\n");
         return;
     }
 
@@ -311,24 +316,18 @@ KeyBcastUdpEntry(ULONG ignore)
     (void)ignore;
 
     while (!isNetworkReady()) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("Key Service bcast udp server waiting for network.\n");
-#endif
+        WOLFLOCAL_LOG(3, "Key Service bcast udp server waiting for network.\n");
         tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     while (gHeapHint == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("KeyBcast waiting for heap.\n");
-#endif
+        WOLFLOCAL_LOG(2, "KeyBcast waiting for heap.\n");
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
     result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
     if (result != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("KeyBcastUdp terminated. (%d)\n", result);
-#endif
+        WOLFLOCAL_LOG(2, "KeyBcastUdp terminated. (%d)\n", result);
     }
 }
 
@@ -352,23 +351,17 @@ KeyClientEntry(ULONG ignore)
 
     result = wolfSSL_Init();
     if (result != SSL_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("KeyClient couldn't initialize wolfSSL. (%d)\n", result);
-#endif
+        WOLFLOCAL_LOG(1, "KeyClient couldn't initialize wolfSSL. (%d)\n", result);
         return;
     }
 
     while (!isNetworkReady()) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("Key Service client waiting for IP Address.\n");
-#endif
+        WOLFLOCAL_LOG(2, "Key Service client waiting for IP Address.\n");
         tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     while (gHeapHint == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("KeyClient waiting for heap.\n");
-#endif
+        WOLFLOCAL_LOG(2, "KeyClient waiting for heap.\n");
         tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
     }
 
@@ -385,22 +378,16 @@ KeyClientEntry(ULONG ignore)
                 tx_mutex_put(&gKeyStateMutex);
             }
             else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-                KS_PRINTF("Couldn't get key state mutex to read\n");
-#endif
+                WOLFLOCAL_LOG(2, "Couldn't get key state mutex to read\n");
             }
         }
 
         if (findMaster) {
             result = KeyClient_FindMaster(&gKeySrvAddr, gHeapHint);
             if (result != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("Key server didn't announce itself.\n");
-#endif
+                WOLFLOCAL_LOG(3, "Key server didn't announce itself.\n");
 #if 0
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-                KS_PRINTF("Taking over as key server.\n");
-#endif
+                WOLFLOCAL_LOG(2, "Taking over as key server.\n");
                 KeyServer_Resume();
 #endif
             }
@@ -412,28 +399,20 @@ KeyClientEntry(ULONG ignore)
             EpochRespPacket_t epochResp;
             result = KeyClient_NewKeyRequest(&gKeySrvAddr, &epochResp, gHeapHint);
             if (result) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                KS_PRINTF("Failed to request new key.\n");
-#endif
+                WOLFLOCAL_LOG(1, "Failed to request new key.\n");
             }
             else {
                 requestRekey = 0;
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                KS_PRINTF("New epoch will be %u.\n",
+                WOLFLOCAL_LOG(1, "New epoch will be %u.\n",
                           ((epochResp.epoch[0] << 8) | epochResp.epoch[1]));
-#endif
             }
         }
 
         if (!findMaster && getNewKey && !storeKey) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("Key client getting key.\n");
-#endif
+            WOLFLOCAL_LOG(3, "Key client getting key.\n");
             result = KeyClient_GetKey(&gKeySrvAddr, &keyResp, gHeapHint);
             if (result != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-                KS_PRINTF("Unable to retrieve key\n");
-#endif
+                WOLFLOCAL_LOG(2, "Unable to retrieve key\n");
             }
             else {
                 getNewKey = 0;
@@ -444,9 +423,7 @@ KeyClientEntry(ULONG ignore)
         if (storeKey) {
             status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
             if (status == TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("Key client got key\n");
-#endif
+                WOLFLOCAL_LOG(3, "Key client got key\n");
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
                 KeyServer_SetKeyResp(&gKeyState, gHeapHint);
                 gKeySet[0] = 1;
@@ -456,9 +433,7 @@ KeyClientEntry(ULONG ignore)
                 tx_mutex_put(&gKeyStateMutex);
             }
             else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-                KS_PRINTF("Couldn't get key state mutex to write\n");
-#endif
+                WOLFLOCAL_LOG(2, "Couldn't get key state mutex to write\n");
             }
         }
 
@@ -482,9 +457,7 @@ WolfCastClientEntry(ULONG streamId)
     int error;
 
     while (!isNetworkReady()) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("wolfCast thread %u waiting for network.\n", streamId);
-#endif
+        WOLFLOCAL_LOG(3, "wolfCast thread %u waiting for network.\n", streamId);
         tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
@@ -507,9 +480,7 @@ WolfCastClientEntry(ULONG streamId)
             tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
 
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-    KS_PRINTF("wolfCast thread %u ended.\n", streamId);
-#endif
+    WOLFLOCAL_LOG(3, "wolfCast thread %u ended.\n", streamId);
 }
 
 
@@ -520,7 +491,7 @@ WolfCastClientEntry(ULONG streamId)
 static void WolfLocalLog(const int logLevel, const char *const logMessage)
 {
     (void)logLevel;
-    bsp_debug_printf("%s\n", logMessage);
+    WOLFLOCAL_LOG(1, "%s\n", logMessage);
 }
 #endif
 
@@ -535,16 +506,6 @@ WolfLocalInit(void)
     UINT status;
     int i;
 
-#if 0
-    /* The wolfcrypt_test() and benchmark_test() are currently removed.
-     * The wolfcrypt_test() causes trouble with the RX board. It uses
-     * too much memory on the stack to perform the memory test, and the
-     * cipher tests use 30k of global data at startup and keeps it
-     * forever. */
-    wolfcrypt_test(NULL);
-    benchmark_test(NULL);
-#endif
-
     gPeerId = CLIENT_ID;
 #ifdef PGB002
     KeyServer_Resume();
@@ -555,18 +516,14 @@ WolfLocalInit(void)
 #endif
 
     if (KeySocket_Init() != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("couldn't initialize the KeySocket\n");
-#endif
+        WOLFLOCAL_LOG(1, "couldn't initialize the KeySocket\n");
         return;
     }
 
     status = tx_mutex_create(&gKeyStateMutex, "key state mutex",
                              TX_NO_INHERIT);
     if (status != TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("key state mutex create failed = 0x%02X\n", status);
-#endif
+        WOLFLOCAL_LOG(1, "key state mutex create failed = 0x%02X\n", status);
         return;
     }
 
@@ -574,9 +531,7 @@ WolfLocalInit(void)
                                  gKeyServiceMemory, sizeof(gKeyServiceMemory),
                                  WOLFMEM_GENERAL, 1);
     if (status != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("WolfLocalInit couldn't get memory pool. (%d)\n", status);
-#endif
+        WOLFLOCAL_LOG(1, "WolfLocalInit couldn't get memory pool. (%d)\n", status);
     }
 
     status = tx_thread_create(&gKeyBcastUdpThread,
@@ -586,10 +541,8 @@ WolfLocalInit(void)
                               KS_PRIORITY, KS_THRESHOLD,
                               TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("key server bcast udp thread create failed = 0x%02X\n",
+        WOLFLOCAL_LOG(1, "key server bcast udp thread create failed = 0x%02X\n",
                   status);
-#endif
         return;
     }
 
@@ -599,9 +552,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("key server thread create failed = 0x%02X\n", status);
-#endif
+        WOLFLOCAL_LOG(1, "key server thread create failed = 0x%02X\n", status);
         return;
     }
 
@@ -611,9 +562,7 @@ WolfLocalInit(void)
                            KS_PRIORITY, KS_THRESHOLD,
                            TX_NO_TIME_SLICE, TX_AUTO_START);
     if (status != TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("key client thread create failed = 0x%02X\n", status);
-#endif
+        WOLFLOCAL_LOG(1, "key client thread create failed = 0x%02X\n", status);
         return;
     }
 
@@ -625,10 +574,9 @@ WolfLocalInit(void)
                                KS_PRIORITY, KS_THRESHOLD,
                                TX_NO_TIME_SLICE, TX_AUTO_START);
         if (status != TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-            KS_PRINTF("wolfCast client thread %u create failed = 0x%02X\n",
-                      i, status);
-#endif
+            WOLFLOCAL_LOG(1,
+                          "wolfCast client thread %u create failed = 0x%02X\n",
+                          i, status);
             return;
         }
     }
@@ -647,21 +595,16 @@ void WolfLocalTimer(void)
 
     /* Give it a X count before trying to do anything. */
     if (count > WOLFLOCAL_TIMER_HOLDOFF) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("timer: %u\n", count);
-#endif
+        WOLFLOCAL_LOG(3, "timer: %u\n", count);
         /* Every X seconds on the 0, ... */
         if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
-#endif
+            WOLFLOCAL_LOG(3, "timer: %u on the 0\n",
+                          WOLFLOCAL_KEY_CHANGE_PERIOD);
             if (KeyServer_IsRunning()) {
                 if (!gRekeyPending) {
                     ret = KeyServer_GenNewKey(gHeapHint);
                     if (ret) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                        KS_PRINTF("Failed to announce new key.\n");
-#endif
+                        WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
                     }
                     else {
                         status = tx_mutex_get(&gKeyStateMutex,
@@ -692,22 +635,16 @@ void WolfLocalTimer(void)
         if (gSwitchKeyCount) {
             gSwitchKeyCount--;
             if (gSwitchKeyCount != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("timer: reannouncing the new key\n");
-#endif
+                WOLFLOCAL_LOG(3, "timer: reannouncing the new key\n");
                 KeyServer_NewKeyChange(gHeapHint);
             }
             else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("timer: 15 seconds later\n");
-#endif
+                WOLFLOCAL_LOG(3, "timer: 15 seconds later\n");
                 if (KeyServer_IsRunning()) {
                     gUseKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
                     ret = KeyServer_NewKeyUse(gHeapHint);
                     if (ret) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                        KS_PRINTF("Failed to announce key switch.\n");
-#endif
+                        WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
                     }
                     else {
                         status = tx_mutex_get(&gKeyStateMutex,
@@ -730,45 +667,38 @@ void WolfLocalTimer(void)
             if (gUseKeyCount != 0) {
                 ret = KeyServer_NewKeyUse(gHeapHint);
                 if (ret) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                    KS_PRINTF("Failed to announce key switch.\n");
-#endif
+                    WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
                 }
             }
         }
 
         if ((count % (WOLFLOCAL_FIND_MASTER_PERIOD * 12)) == 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                unsigned int ks, mac, replay, epoch, i;
+            unsigned int ks, mac, replay, epoch, i;
 
-                ks = KeyServer_GetAuthFailCount();
-                KS_PRINTF("Key Server auth fail counts: %u\n", ks);
+            ks = KeyServer_GetAuthFailCount();
+            WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
 
-                for (i = 0; i < 3; i++) {
-                    wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
-                    KS_PRINTF("Wrapper[%u] macFail: %u\n"
-                              "            replayCount: %u\n"
-                              "            epochDrop: %u\n",
-                              i, mac, replay, epoch);
-                }
-#endif
+            for (i = 0; i < 3; i++) {
+                wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
+                WOLFLOCAL_LOG(3, "Wrapper[%u] macFail: %u\n"
+                          "            replayCount: %u\n"
+                          "            epochDrop: %u\n",
+                          i, mac, replay, epoch);
+            }
         }
 
 #if 0
         if ((count % WOLFLOCAL_FIND_MASTER_PERIOD) == 3) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("timer: %u on the 3\n", WOLFLOCAL_FIND_MASTER_PERIOD);
-#endif
+            WOLFLOCAL_LOG(3, "timer: %u on the 3\n",
+                          WOLFLOCAL_FIND_MASTER_PERIOD);
             if (!KeyServer_IsRunning()) {
                 struct in_addr scratch;
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("finding the master\n");
-#endif
+                WOLFLOCAL_LOG(3, "finding the master\n");
                 ret = KeyClient_FindMaster(&scratch, gHeapHint);
                 if (ret != 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-                    KS_PRINTF("Key server didn't announce itself, becoming master.\n");
-#endif
+                    WOLFLOCAL_LOG(2,
+                                  "Key server didn't announce itself, "
+                                  "becoming master.\n");
                     KeyServer_Resume();
                 }
             }
@@ -791,9 +721,7 @@ NetxDtlsTxCallback(
     (void)ssl;
 
     if (ctx == NULL || buf == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("transmit callback invalid parameters\n");
-#endif
+        WOLFLOCAL_LOG(1, "transmit callback invalid parameters\n");
         goto exit;
     }
     wrapper = (wolfWrapper_t*)ctx;
@@ -801,27 +729,21 @@ NetxDtlsTxCallback(
     status = nx_packet_allocate(wrapper->pool, &pkt,
                                 NX_UDP_PACKET, NX_WAIT_FOREVER);
     if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("couldn't allocate packet wrapper\n");
-#endif
+        WOLFLOCAL_LOG(1, "couldn't allocate packet wrapper\n");
         goto exit;
     }
 
     status = nx_packet_data_append(pkt, buf, sz,
                                    wrapper->pool, NX_WAIT_FOREVER);
     if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("couldn't append data to packet\n");
-#endif
+        WOLFLOCAL_LOG(1, "couldn't append data to packet\n");
         goto exit;
     }
 
     status = nx_udp_socket_send(&wrapper->realTxSocket, pkt,
                                 wrapper->groupAddr, wrapper->groupPort);
     if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("tx error\n");
-#endif
+        WOLFLOCAL_LOG(1, "tx error\n");
         goto exit;
     }
 
@@ -832,9 +754,7 @@ exit:
         /* In case of error, release packet. */
         status = nx_packet_release(pkt);
         if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-            KS_PRINTF("couldn't release packet\n");
-#endif
+            WOLFLOCAL_LOG(1, "couldn't release packet\n");
         }
     }
 
@@ -856,42 +776,32 @@ NetxDtlsRxCallback(
     (void)ssl;
 
     if (ctx == NULL || buf == NULL || sz <= 0) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("receive callback invalid parameters\n");
-#endif
+        WOLFLOCAL_LOG(1, "receive callback invalid parameters\n");
         goto exit;
     }
 
     wrapper = (wolfWrapper_t*)ctx;
     pkt = wrapper->rxPacket;
     if (pkt == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("no packet\n");
-#endif
+        WOLFLOCAL_LOG(1, "no packet\n");
         status = NX_NO_PACKET;
         goto exit;
     }
 
     status = nx_packet_length_get(pkt, &rxSz);
     if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("couldn't get packet length\n");
-#endif
+        WOLFLOCAL_LOG(1, "couldn't get packet length\n");
         goto exit;
     }
 
     if (rxSz > (unsigned long)sz) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("receive packet too large for buffer\n");
-#endif
+        WOLFLOCAL_LOG(1, "receive packet too large for buffer\n");
         goto exit;
     }
 
     status = nx_packet_data_retrieve(pkt, buf, &rxSz);
     if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("couldn't retrieve packet\n");
-#endif
+        WOLFLOCAL_LOG(1, "couldn't retrieve packet\n");
         goto exit;
     }
 
@@ -906,9 +816,7 @@ exit:
     if (pkt != NULL) {
         status = nx_packet_release(pkt);
         if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-            KS_PRINTF("couldn't release packet\n");
-#endif
+            WOLFLOCAL_LOG(1, "couldn't release packet\n");
         }
         else
             wrapper->rxPacket = NULL;
@@ -954,9 +862,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     ret = wolfSSL_Init();
     if (ret != SSL_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("wolfWrapper_Init couldn't initialize wolfSSL\n");
-#endif
+        WOLFLOCAL_LOG(1, "wolfWrapper_Init couldn't initialize wolfSSL\n");
         goto exit;
     }
 
@@ -964,9 +870,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                          wolfDTLSv1_2_client_method_ex,
                                          heap, heapSz, 0, 2);
     if (ret != SSL_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("unable to load static memory and create ctx\n");
-#endif
+        WOLFLOCAL_LOG(1, "unable to load static memory and create ctx\n");
         goto exit;
     }
 
@@ -974,35 +878,25 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     wolfSSL_SetIORecv(wrapper->ctx, NetxDtlsRxCallback);
     ret = wolfSSL_CTX_mcast_set_member_id(wrapper->ctx, myId);
     if (ret != SSL_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("set mcast member id error\n");
-#endif
+        WOLFLOCAL_LOG(1, "set mcast member id error\n");
         goto exit;
     }
 
     ret = nx_udp_enable(wrapper->ip);
     if (ret == NX_ALREADY_ENABLED) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("UDP already enabled\n");
-#endif
+        WOLFLOCAL_LOG(3, "UDP already enabled\n");
     }
     else if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("cannot enable UDP\n");
-#endif
+        WOLFLOCAL_LOG(1, "cannot enable UDP\n");
         goto exit;
     }
 
     ret = nx_igmp_enable(wrapper->ip);
     if (ret == NX_ALREADY_ENABLED) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("IGMP already enabled\n");
-#endif
+        WOLFLOCAL_LOG(3, "IGMP already enabled\n");
     }
     else if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("cannot enable IGMP\n");
-#endif
+        WOLFLOCAL_LOG(1, "cannot enable IGMP\n");
         goto exit;
     }
 
@@ -1011,26 +905,20 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                NX_IP_NORMAL, NX_DONT_FRAGMENT,
                                NX_IP_TIME_TO_LIVE, 30);
     if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("unable to create tx socket\n");
-#endif
+        WOLFLOCAL_LOG(1, "unable to create tx socket\n");
         goto exit;
     }
 
     ret = nx_udp_socket_bind(&wrapper->realTxSocket, NX_ANY_PORT, NX_NO_WAIT);
     if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("tx bind failed\n");
-#endif
+        WOLFLOCAL_LOG(1, "tx bind failed\n");
         goto exit;
     }
 
     ret = nx_igmp_loopback_disable(wrapper->ip);
 
     if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("couldn't disable multicast loopback\n");
-#endif
+        WOLFLOCAL_LOG(1, "couldn't disable multicast loopback\n");
         goto exit;
     }
 
@@ -1039,48 +927,36 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                NX_IP_NORMAL, NX_DONT_FRAGMENT,
                                NX_IP_TIME_TO_LIVE, 30);
     if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("unable to create rx socket\n");
-#endif
+        WOLFLOCAL_LOG(1, "unable to create rx socket\n");
         goto exit;
     }
 
     ret = nx_udp_socket_bind(&wrapper->realRxSocket,
                              wrapper->groupPort, NX_NO_WAIT);
     if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("rx bind failed\n");
-#endif
+        WOLFLOCAL_LOG(1, "rx bind failed\n");
         goto exit;
     }
 
     ret = nx_igmp_multicast_join(wrapper->ip, wrapper->groupAddr);
     if (ret != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("setsockopt mc add membership failed\n");
-#endif
+        WOLFLOCAL_LOG(1, "setsockopt mc add membership failed\n");
         goto exit;
     }
 
     /* Wait for the first key. */
     while (!keySet) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("wolfCast thread waiting for first key.\n");
-#endif
+        WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
         tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
 
         ret = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
         if (ret == TX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("wolfCast getting key set flag\n");
-#endif
+            WOLFLOCAL_LOG(3, "wolfCast getting key set flag\n");
             keySet = gKeySet[streamId];
             ret = tx_mutex_put(&gKeyStateMutex);
         }
         else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("Couldn't get key mutex. Trying again.\n");
-#endif
+            WOLFLOCAL_LOG(3, "Couldn't get key mutex. Trying again.\n");
         }
     }
     gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
@@ -1097,17 +973,13 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
     WOLFSSL* newSsl = NULL;
 
     if (wrapper == NULL || ssl == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("wolfWrapper_NewWrapper invalid parameters\n");
-#endif
+        WOLFLOCAL_LOG(1, "wolfWrapper_NewWrapper invalid parameters\n");
         goto exit;
     }
 
     newSsl = wolfSSL_new(wrapper->ctx);
     if (newSsl == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("ssl new error\n");
-#endif
+        WOLFLOCAL_LOG(1, "ssl new error\n");
         goto exit;
     }
 
@@ -1118,9 +990,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
     for (i = 0; i < wrapper->peerIdListSz; i++) {
         ret = wolfSSL_mcast_peer_add(newSsl, wrapper->peerIdList[i], 0);
         if (ret != SSL_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-            KS_PRINTF("mcast add peer error\n");
-#endif
+            WOLFLOCAL_LOG(1, "mcast add peer error\n");
             goto exit;
         }
     }
@@ -1174,10 +1044,8 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
     }
 
     if (wrapper->switchKeys) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("switchKeys = %u, newEpoch = %u, epoch = %u\n",
-                wrapper->switchKeys, wrapper->newEpoch, wrapper->epoch);
-#endif
+        WOLFLOCAL_LOG(3, "switchKeys = %u, newEpoch = %u, epoch = %u\n",
+                  wrapper->switchKeys, wrapper->newEpoch, wrapper->epoch);
         if (wrapper->switchKeys == wrapper->newEpoch &&
             wrapper->newEpoch != wrapper->epoch) {
 
@@ -1199,18 +1067,14 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
             if (status != SSL_SUCCESS) {
                 error = 1;
                 wolfSSL_free(newSsl);
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-                KS_PRINTF("Couldn't set the session secret\n");
-#endif
+                WOLFLOCAL_LOG(1, "Couldn't set the session secret\n");
                 goto exit;
             }
             memset(&wrapper->keyState, 0, sizeof(wrapper->keyState));
 
             if (wrapper->prevSsl != NULL) {
                 unsigned int macCount = 0, replayCount = 0;
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-                KS_PRINTF("Releasing old session.\n");
-#endif
+                WOLFLOCAL_LOG(3, "Releasing old session.\n");
 
                 wolfSSL_dtls_get_drop_stats(wrapper->prevSsl,
                                             &macCount, &replayCount);
@@ -1226,14 +1090,10 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
         else if (wrapper->switchKeys == wrapper->epoch) {
             /* Happens when a client rejoins, the master rekeys,
              * and sends out the rekey messages for the peers. */
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("Spurious key switch, ignoring.\n");
-#endif
+            WOLFLOCAL_LOG(3, "Spurious key switch, ignoring.\n");
         }
         else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-            KS_PRINTF("Missed a key change.\n");
-#endif
+            WOLFLOCAL_LOG(2, "Missed a key change.\n");
             gGetNewKey = 1;
         }
 
@@ -1282,10 +1142,8 @@ int wolfWrapper_Write(wolfWrapper_t* wrapper, const void* buf, int sz)
     sentSz = wolfSSL_write(wrapper->curSsl, buf, sz);
     if (sentSz < 0) {
         sentSz = wolfSSL_get_error(wrapper->curSsl, sentSz);
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-        KS_PRINTF("wolfSSL error: %s\n",
+        WOLFLOCAL_LOG(1, "wolfSSL error: %s\n",
                   wolfSSL_ERR_reason_error_string(sentSz));
-#endif
     }
 
 exit:
@@ -1324,9 +1182,7 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
     }
 
     if (ssl == NULL) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-        KS_PRINTF("Ignoring message unknown Epoch.\n");
-#endif
+        WOLFLOCAL_LOG(3, "Ignoring message unknown Epoch.\n");
         wrapper->epochDropCount++;
         goto exit;
     }
@@ -1335,15 +1191,11 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
     if (recvSz < 0) {
         recvSz = wolfSSL_get_error(ssl, recvSz);
         if (recvSz == VERIFY_MAC_ERROR || recvSz == DECRYPT_ERROR) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 3
-            KS_PRINTF("Allowable DTLS error. Ignoring a message.\n");
-#endif
+            WOLFLOCAL_LOG(3, "Allowable DTLS error. Ignoring a message.\n");
         }
         else if (recvSz != SSL_ERROR_WANT_READ) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-            KS_PRINTF("wolfSSL error: %s\n",
+            WOLFLOCAL_LOG(1, "wolfSSL error: %s\n",
                       wolfSSL_ERR_reason_error_string(recvSz));
-#endif
             goto exit;
         }
     }
@@ -1352,9 +1204,7 @@ exit:
     if (wrapper->rxPacket != NULL) {
         status = nx_packet_release(wrapper->rxPacket);
         if (status != NX_SUCCESS) {
-#if WOLFLOCAL_LOGGING_LEVEL >= 1
-            KS_PRINTF("couldn't release packet\n");
-#endif
+            WOLFLOCAL_LOG(1, "couldn't release packet\n");
         }
         wrapper->rxPacket = NULL;
     }
@@ -1380,17 +1230,13 @@ int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
                                               &prevMacCount, &prevReplayCount);
         if (ret != SSL_SUCCESS) {
             ret = 1;
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-            KS_PRINTF("getting stats from DTLS session failed.\n");
-#endif
+            WOLFLOCAL_LOG(2, "getting stats from DTLS session failed.\n");
         }
         else
             ret = 0;
     }
     else {
-#if WOLFLOCAL_LOGGING_LEVEL >= 2
-        KS_PRINTF("Tried to get error stats from wrapper NULL\n");
-#endif
+        WOLFLOCAL_LOG(2, "Tried to get error stats from wrapper NULL\n");
     }
 
     if (macDropCount != NULL)
