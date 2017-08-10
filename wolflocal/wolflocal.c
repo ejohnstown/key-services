@@ -72,7 +72,6 @@ static void FilteredLog(int level, const char* fmt, ...)
 #define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_STATE_WRITE TX_WAIT_FOREVER
 #define KS_TIMEOUT_KEY_STATE_READ TX_NO_WAIT
-#define KS_TIMEOUT_HEAP_INIT KS_TIMEOUT_1SEC
 
 #define SERVER_ID 5
 #define FOREIGN_CLIENT_ID 23
@@ -135,6 +134,7 @@ static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
  * wolfCast client will set a semaphore to for the Key
  * Client to request a new key. */
 static TX_MUTEX gKeyStateMutex;
+static TX_EVENT_FLAGS_GROUP gEventFlags;
 static UINT gKeySet[3] = { 0, 0, 0 };
 UINT gGetNewKey = 1;
 UINT gRequestRekey = 0;
@@ -171,6 +171,9 @@ extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
 extern unsigned char gPeerId;
 
+#define KS_EVENT_HEAP (1 << 0)
+#define KS_EVENT_ADDR (1 << 1)
+
 
 static int isAddrSet(void)
 {
@@ -190,17 +193,6 @@ static int isAddrSet(void)
     }
 
     return isSet;
-}
-
-
-static int isNetworkReady(void)
-{
-    int isReady = 0;
-
-    if (gAddr != 0)
-        isReady = 1;
-
-    return isReady;
 }
 
 
@@ -233,6 +225,17 @@ KeyServerEntry(ULONG ignore)
 
     (void)ignore;
 
+    {
+        ULONG flags;
+        result = tx_event_flags_get(&gEventFlags, KS_EVENT_HEAP,
+                                    TX_AND, &flags, TX_WAIT_FOREVER);
+        if (result == TX_SUCCESS)
+            WOLFLOCAL_LOG(3, "KeyServerEntry got the start event (%u)\n",
+                          flags);
+        else
+            WOLFLOCAL_LOG(1, "KeyServerEntry failed to get event flags\n");
+    }
+
     if (wolfSSL_Init() != SSL_SUCCESS) {
         WOLFLOCAL_LOG(1, "KeyServer couldn't initialize wolfSSL.\n");
     }
@@ -242,19 +245,17 @@ KeyServerEntry(ULONG ignore)
         tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
-    while (gHeapHint == NULL) {
-        WOLFLOCAL_LOG(2, "KeyServer waiting for heap.\n");
-        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
-    }
-
     {
         struct in_addr inaddr;
         inaddr.s_addr = gAddr;
         result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
     }
+
     if (result != 0) {
         WOLFLOCAL_LOG(1, "KeyServer couldn't initialize. (%d)\n", result);
     }
+
+    tx_event_flags_set(&gEventFlags, KS_EVENT_ADDR, TX_OR);
 
     if (result == 0) {
         result = KeyServer_Run(keyServerCb, gHeapHint);
@@ -311,19 +312,17 @@ broadcastCb(CmdPacket_t* pkt)
 static void
 KeyBcastUdpEntry(ULONG ignore)
 {
+    ULONG flags = 0;
     int result;
 
     (void)ignore;
 
-    while (!isNetworkReady()) {
-        WOLFLOCAL_LOG(3, "Key Service bcast udp server waiting for network.\n");
-        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
-    }
-
-    while (gHeapHint == NULL) {
-        WOLFLOCAL_LOG(2, "KeyBcast waiting for heap.\n");
-        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
-    }
+    result = tx_event_flags_get(&gEventFlags, (KS_EVENT_HEAP | KS_EVENT_ADDR),
+                                TX_AND, &flags, TX_WAIT_FOREVER);
+    if (result == TX_SUCCESS)
+        WOLFLOCAL_LOG(3, "KeyBcastUdpEntry got the start event (%u)\n", flags);
+    else
+        WOLFLOCAL_LOG(1, "KeyBcastUdpEntry failed to get event flags\n");
 
     result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
     if (result != 0) {
@@ -339,6 +338,7 @@ KeyBcastUdpEntry(ULONG ignore)
 static void
 KeyClientEntry(ULONG ignore)
 {
+    ULONG flags = 0;
     int result;
     UINT findMaster = 0;
     UINT requestRekey = 0;
@@ -355,15 +355,12 @@ KeyClientEntry(ULONG ignore)
         return;
     }
 
-    while (!isNetworkReady()) {
-        WOLFLOCAL_LOG(2, "Key Service client waiting for IP Address.\n");
-        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
-    }
-
-    while (gHeapHint == NULL) {
-        WOLFLOCAL_LOG(2, "KeyClient waiting for heap.\n");
-        tx_thread_sleep(KS_TIMEOUT_HEAP_INIT);
-    }
+    result = tx_event_flags_get(&gEventFlags, (KS_EVENT_HEAP | KS_EVENT_ADDR),
+                                TX_AND, &flags, TX_WAIT_FOREVER);
+    if (result == TX_SUCCESS)
+        WOLFLOCAL_LOG(3, "KeyClientEntry got the start event (%u)\n", flags);
+    else
+        WOLFLOCAL_LOG(1, "KeyClientEntry failed to get event flags\n");
 
     while (1) {
         if (!findMaster && !requestRekey && !getNewKey && !storeKey) {
@@ -456,9 +453,15 @@ WolfCastClientEntry(ULONG streamId)
     unsigned int txCount;
     int error;
 
-    while (!isNetworkReady()) {
-        WOLFLOCAL_LOG(3, "wolfCast thread %u waiting for network.\n", streamId);
-        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
+    {
+        ULONG flags = 0;
+        error = tx_event_flags_get(&gEventFlags, KS_EVENT_ADDR,
+                                   TX_AND, &flags, TX_WAIT_FOREVER);
+        if (error == TX_SUCCESS)
+            WOLFLOCAL_LOG(3, "WolfCastClientEntry got the start event (%u)\n",
+                          flags);
+        else
+            WOLFLOCAL_LOG(1, "WolfCastClientEntry failed to get event flags\n");
     }
 
     wrapper = &gWrappers[streamId];
@@ -506,6 +509,10 @@ WolfLocalInit(void)
     UINT status;
     int i;
 
+    status = tx_event_flags_create(&gEventFlags, "WolfLocal Event Flags");
+    if (status != TX_SUCCESS)
+        WOLFLOCAL_LOG(1, "couldn't create event flags");
+
     gPeerId = CLIENT_ID;
 #ifdef PGB002
     KeyServer_Resume();
@@ -532,6 +539,11 @@ WolfLocalInit(void)
                                  WOLFMEM_GENERAL, 1);
     if (status != 0) {
         WOLFLOCAL_LOG(1, "WolfLocalInit couldn't get memory pool. (%d)\n", status);
+    }
+    status = tx_event_flags_set(&gEventFlags, KS_EVENT_HEAP, TX_OR);
+    if (status != TX_SUCCESS) {
+        WOLFLOCAL_LOG(1, "couldn't set the heap ready flag\n");
+        return;
     }
 
     status = tx_thread_create(&gKeyBcastUdpThread,
