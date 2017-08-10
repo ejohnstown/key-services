@@ -349,12 +349,6 @@ KeyClientEntry(ULONG ignore)
 
     (void)ignore;
 
-    result = wolfSSL_Init();
-    if (result != SSL_SUCCESS) {
-        WOLFLOCAL_LOG(1, "KeyClient couldn't initialize wolfSSL. (%d)\n", result);
-        return;
-    }
-
     result = tx_event_flags_get(&gEventFlags, (KS_EVENT_HEAP | KS_EVENT_ADDR),
                                 TX_AND, &flags, TX_WAIT_FOREVER);
     if (result == TX_SUCCESS)
@@ -871,12 +865,6 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     wrapper->ip = &bsp_ip_local_bus;
     wrapper->pool = &bsp_pool_local_bus;
 #endif /* PGB002 */
-
-    ret = wolfSSL_Init();
-    if (ret != SSL_SUCCESS) {
-        WOLFLOCAL_LOG(1, "wolfWrapper_Init couldn't initialize wolfSSL\n");
-        goto exit;
-    }
 
     ret = wolfSSL_CTX_load_static_memory(&wrapper->ctx,
                                          wolfDTLSv1_2_client_method_ex,
