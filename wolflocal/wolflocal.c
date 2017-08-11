@@ -377,10 +377,6 @@ KeyClientEntry(ULONG ignore)
             result = KeyClient_FindMaster(&gKeySrvAddr, gHeapHint);
             if (result != 0) {
                 WOLFLOCAL_LOG(3, "Key server didn't announce itself.\n");
-#if 0
-                WOLFLOCAL_LOG(2, "Taking over as key server.\n");
-                KeyServer_Resume();
-#endif
             }
             else
                 findMaster = 0;
@@ -1179,6 +1175,26 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
         gSwitchKeys[0] = epoch;
         gSwitchKeys[1] = epoch;
         gSwitchKeys[2] = epoch;
+
+        if (KeyServer_IsRunning()) {
+            gKeyServerEpoch = epoch;
+            if (!gRekeyPending) {
+                status = KeyServer_GenNewKey(gHeapHint);
+                if (status) {
+                    WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
+                }
+                else {
+                    status = tx_mutex_get(&gKeyStateMutex,
+                                          KS_TIMEOUT_KEY_STATE_WRITE);
+                    if (status == TX_SUCCESS) {
+                        gGetNewKey = 1;
+                        gRekeyPending = 1;
+                        gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
+                        tx_mutex_put(&gKeyStateMutex);
+                    }
+                }
+            }
+        }
     }
 
     if (ssl == NULL) {
