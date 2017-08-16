@@ -89,12 +89,11 @@ static void FilteredLog(int level, const char* fmt, ...)
 #ifndef WOLFLOCAL_KEY_CHANGE_PERIOD
     #define WOLFLOCAL_KEY_CHANGE_PERIOD 60
 #endif
-#ifndef WOLFLOCAL_TIMER_HOLDOFF
-    #define WOLFLOCAL_TIMER_HOLDOFF 20
-#endif
-
 #ifndef WOLFLOCAL_FIND_MASTER_PERIOD
     #define WOLFLOCAL_FIND_MASTER_PERIOD 5
+#endif
+#ifndef WOLFLOCAL_STATS_PERIOD
+    #define WOLFLOCAL_STATS_PERIOD 60
 #endif
 
 #ifdef PGB000
@@ -593,120 +592,133 @@ void WolfLocalTimer(void)
     UINT status;
     int ret;
 
+    if (count == 0) {
+        ULONG flags = 0;
+        status = tx_event_flags_get(&gEventFlags,
+                                    (KS_EVENT_HEAP | KS_EVENT_ADDR),
+                                    TX_AND, &flags, TX_NO_WAIT);
+        if (status != TX_SUCCESS) {
+            WOLFLOCAL_LOG(3, "timer: event flags not set yet\n");
+            return;
+        }
+
+        if (flags != (KS_EVENT_HEAP | KS_EVENT_ADDR)) {
+            WOLFLOCAL_LOG(3, "timer: flags not set correctly\n");
+            return;
+        }
+
+        WOLFLOCAL_LOG(3, "timer: good to go!\n");
+    }
+
     count++;
 
-    /* Give it a X count before trying to do anything. */
-    if (count > WOLFLOCAL_TIMER_HOLDOFF) {
-        WOLFLOCAL_LOG(3, "timer: %u\n", count);
-        /* Every X seconds on the 0, ... */
-        if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
-            WOLFLOCAL_LOG(3, "timer: %u on the 0\n",
-                          WOLFLOCAL_KEY_CHANGE_PERIOD);
-            if (KeyServer_IsRunning()) {
-                if (!gRekeyPending) {
-                    ret = KeyServer_GenNewKey(gHeapHint);
-                    if (ret) {
-                        WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
-                    }
-                    else {
-                        status = tx_mutex_get(&gKeyStateMutex,
-                                              KS_TIMEOUT_KEY_STATE_WRITE);
-                        if (status == TX_SUCCESS) {
-                            gGetNewKey = 1;
-                            gRekeyPending = 1;
-                            gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
-                            tx_mutex_put(&gKeyStateMutex);
-                        }
+    WOLFLOCAL_LOG(3, "timer: %u\n", count);
+    /* Every X seconds on the 0, ... */
+    if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
+        WOLFLOCAL_LOG(3, "timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
+        if (KeyServer_IsRunning()) {
+            if (!gRekeyPending) {
+                ret = KeyServer_GenNewKey(gHeapHint);
+                if (ret) {
+                    WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
+                }
+                else {
+                    status = tx_mutex_get(&gKeyStateMutex,
+                                          KS_TIMEOUT_KEY_STATE_WRITE);
+                    if (status == TX_SUCCESS) {
+                        gGetNewKey = 1;
+                        gRekeyPending = 1;
+                        gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
+                        tx_mutex_put(&gKeyStateMutex);
                     }
                 }
             }
-            else {
+        }
+        else {
 #ifdef WOLFLOCAL_TEST_KEY_REQUEST
-                status = tx_mutex_get(&gKeyStateMutex,
-                                      KS_TIMEOUT_KEY_STATE_WRITE);
-                if (status == NX_SUCCESS) {
-                    gRequestRekey = 1;
-                    tx_mutex_put(&gKeyStateMutex);
-                }
+            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_WRITE);
+            if (status == NX_SUCCESS) {
+                gRequestRekey = 1;
+                tx_mutex_put(&gKeyStateMutex);
+            }
 #endif /* WOLFLOCAL_TEST_KEY_REQUEST */
-            }
         }
+    }
 
-        /* If the switch key count is set, decrement it. If it becomes 0,
-         * switch the keys. */
-        if (gSwitchKeyCount) {
-            gSwitchKeyCount--;
-            if (gSwitchKeyCount != 0) {
-                WOLFLOCAL_LOG(3, "timer: reannouncing the new key\n");
-                KeyServer_NewKeyChange(gHeapHint);
-            }
-            else {
-                WOLFLOCAL_LOG(3, "timer: 15 seconds later\n");
-                if (KeyServer_IsRunning()) {
-                    gUseKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
-                    ret = KeyServer_NewKeyUse(gHeapHint);
-                    if (ret) {
-                        WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
-                    }
-                    else {
-                        status = tx_mutex_get(&gKeyStateMutex,
-                                              KS_TIMEOUT_KEY_STATE_WRITE);
-                        if (status == TX_SUCCESS) {
-                            gSwitchKeys[0] = gKeyServerEpoch;
-                            gSwitchKeys[1] = gKeyServerEpoch;
-                            gSwitchKeys[2] = gKeyServerEpoch;
-                            /* Should be an epoch number */
-                            gRekeyPending = 0;
-                            tx_mutex_put(&gKeyStateMutex);
-                        }
-                    }
-                }
-            }
+    /* If the switch key count is set, decrement it. If it becomes 0,
+     * switch the keys. */
+    if (gSwitchKeyCount) {
+        gSwitchKeyCount--;
+        if (gSwitchKeyCount != 0) {
+            WOLFLOCAL_LOG(3, "timer: reannouncing the new key\n");
+            KeyServer_NewKeyChange(gHeapHint);
         }
-
-        if (gUseKeyCount) {
-            gUseKeyCount--;
-            if (gUseKeyCount != 0) {
+        else {
+            WOLFLOCAL_LOG(3, "timer: 15 seconds later\n");
+            if (KeyServer_IsRunning()) {
+                gUseKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
                 ret = KeyServer_NewKeyUse(gHeapHint);
                 if (ret) {
                     WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
                 }
-            }
-        }
-
-        if ((count % (WOLFLOCAL_FIND_MASTER_PERIOD * 12)) == 0) {
-            unsigned int ks, mac, replay, epoch, i;
-
-            ks = KeyServer_GetAuthFailCount();
-            WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
-
-            for (i = 0; i < 3; i++) {
-                wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
-                WOLFLOCAL_LOG(3, "Wrapper[%u] macFail: %u\n"
-                          "            replayCount: %u\n"
-                          "            epochDrop: %u\n",
-                          i, mac, replay, epoch);
-            }
-        }
-
-#if 0
-        if ((count % WOLFLOCAL_FIND_MASTER_PERIOD) == 3) {
-            WOLFLOCAL_LOG(3, "timer: %u on the 3\n",
-                          WOLFLOCAL_FIND_MASTER_PERIOD);
-            if (!KeyServer_IsRunning()) {
-                struct in_addr scratch;
-                WOLFLOCAL_LOG(3, "finding the master\n");
-                ret = KeyClient_FindMaster(&scratch, gHeapHint);
-                if (ret != 0) {
-                    WOLFLOCAL_LOG(2,
-                                  "Key server didn't announce itself, "
-                                  "becoming master.\n");
-                    KeyServer_Resume();
+                else {
+                    status = tx_mutex_get(&gKeyStateMutex,
+                                          KS_TIMEOUT_KEY_STATE_WRITE);
+                    if (status == TX_SUCCESS) {
+                        gSwitchKeys[0] = gKeyServerEpoch;
+                        gSwitchKeys[1] = gKeyServerEpoch;
+                        gSwitchKeys[2] = gKeyServerEpoch;
+                        /* Should be an epoch number */
+                        gRekeyPending = 0;
+                        tx_mutex_put(&gKeyStateMutex);
+                    }
                 }
             }
         }
-#endif
     }
+
+    if (gUseKeyCount) {
+        gUseKeyCount--;
+        if (gUseKeyCount != 0) {
+            ret = KeyServer_NewKeyUse(gHeapHint);
+            if (ret) {
+                WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
+            }
+        }
+    }
+
+    if ((count % WOLFLOCAL_STATS_PERIOD) == 0) {
+        unsigned int ks, mac, replay, epoch, i;
+
+        ks = KeyServer_GetAuthFailCount();
+        WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
+
+        for (i = 0; i < 3; i++) {
+            wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
+            WOLFLOCAL_LOG(3, "Wrapper[%u] macFail: %u\n"
+                      "            replayCount: %u\n"
+                      "            epochDrop: %u\n",
+                      i, mac, replay, epoch);
+        }
+    }
+
+#if 0
+    if ((count % WOLFLOCAL_FIND_MASTER_PERIOD) == 3) {
+        WOLFLOCAL_LOG(3, "timer: %u on the 3\n",
+                      WOLFLOCAL_FIND_MASTER_PERIOD);
+        if (!KeyServer_IsRunning()) {
+            struct in_addr scratch;
+            WOLFLOCAL_LOG(3, "finding the master\n");
+            ret = KeyClient_FindMaster(&scratch, gHeapHint);
+            if (ret != 0) {
+                WOLFLOCAL_LOG(2,
+                              "Key server didn't announce itself, "
+                              "becoming master.\n");
+                KeyServer_Resume();
+            }
+        }
+    }
+#endif
 }
 
 
