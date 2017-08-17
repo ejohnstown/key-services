@@ -50,7 +50,7 @@ static void FilteredLog(int level, const char* fmt, ...)
     vsnprintf(output, sizeof(output), fmt, args);
     va_end(args);
 
-    if (level >= WOLFLOCAL_LOGGING_LEVEL)
+    if (level <= WOLFLOCAL_LOGGING_LEVEL)
         bsp_debug_printf("%s", output);
 }
 
