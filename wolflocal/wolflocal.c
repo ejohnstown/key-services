@@ -645,6 +645,9 @@ void WolfLocalTimer(void)
         }
     }
 
+    if (gSwitchKeyCount && gUseKeyCount)
+        gUseKeyCount = 0;
+
     /* If the switch key count is set, decrement it. If it becomes 0,
      * switch the keys. */
     if (gSwitchKeyCount) {
