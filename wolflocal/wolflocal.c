@@ -68,7 +68,6 @@ static void FilteredLog(int level, const char* fmt, ...)
 #define KS_TIMEOUT_1SEC 100
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_CLIENT KS_TIMEOUT_1SEC
-#define KS_TIMEOUT_WOLFLOCAL_KEY_POLL KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_STATE_WRITE TX_WAIT_FOREVER
 #define KS_TIMEOUT_KEY_STATE_READ TX_NO_WAIT
@@ -133,18 +132,14 @@ static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
  * wolfCast client will set a semaphore to for the Key
  * Client to request a new key. */
 static TX_MUTEX gKeyStateMutex;
-static TX_EVENT_FLAGS_GROUP gEventFlags;
-static UINT gKeySet[3] = { 0, 0, 0 };
-UINT gGetNewKey = 1;
-UINT gRequestRekey = 0;
-static UINT gFindMaster = 1;
-UINT gSwitchKeys[3] = { 1, 1, 1 };
+TX_EVENT_FLAGS_GROUP gEventFlags;
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
 static UINT gRekeyPending = 0;
 static UINT gSwitchKeyCount = 0;
 static UINT gUseKeyCount = 0;
+static USHORT gSwitchEpoch = 0;
 wolfWrapper_t gWrappers[3];
 ULONG gAddr = 0;
 ULONG gMask = 0;
@@ -172,6 +167,31 @@ extern unsigned char gPeerId;
 
 #define KS_EVENT_HEAP (1 << 0)
 #define KS_EVENT_ADDR (1 << 1)
+#define KS_EVENT_FINDMASTER (1 << 2)
+#define KS_EVENT_REQREKEY (1 << 3)
+#define KS_EVENT_GETNEWKEY (1 << 4)
+#define KS_EVENT_KEYSET_0 (1 << 5)
+#define KS_EVENT_KEYSET_1 (1 << 6)
+#define KS_EVENT_KEYSET_2 (1 << 7)
+#define KS_EVENT_SWITCH_0 (1 << 8)
+#define KS_EVENT_SWITCH_1 (1 << 9)
+#define KS_EVENT_SWITCH_2 (1 << 10)
+
+#define KS_EVENT_SET_KEYCLIENT (KS_EVENT_FINDMASTER | \
+                                KS_EVENT_REQREKEY | \
+                                KS_EVENT_GETNEWKEY)
+#define KS_EVENT_SET_KEYSET (KS_EVENT_KEYSET_0 | \
+                             KS_EVENT_KEYSET_1 | \
+                             KS_EVENT_KEYSET_2)
+#define KS_EVENT_SET_SWITCH (KS_EVENT_SWITCH_0 | \
+                             KS_EVENT_SWITCH_1 | \
+                             KS_EVENT_SWITCH_2)
+#define KS_EVENT_SET_INIT (KS_EVENT_HEAP | \
+                           KS_EVENT_FINDMASTER | \
+                           KS_EVENT_GETNEWKEY)
+
+#define KS_EVENT_KEYSET(x) (KS_EVENT_KEYSET_0 << (x))
+#define KS_EVENT_SWITCH(x) (KS_EVENT_SWITCH_0 << (x))
 
 
 static int isAddrSet(void)
@@ -285,16 +305,15 @@ broadcastCb(CmdPacket_t* pkt)
                 /* trigger key change */
                 msg = pkt->msg.keyChgResp.ipaddr;
                 XMEMCPY(&gKeySrvAddr.s_addr, msg, sizeof(gKeySrvAddr.s_addr));
-                gGetNewKey = 1;
+                tx_event_flags_set(&gEventFlags, KS_EVENT_GETNEWKEY, TX_OR);
                 break;
             case CMD_PKT_TYPE_KEY_USE:
                 /* switch to new key */
                 msg = pkt->msg.epochResp.epoch;
                 epoch = (msg[0] << 8) | msg[1];
                 if (epoch != gKeyServerEpoch) {
-                    gSwitchKeys[0] = epoch;
-                    gSwitchKeys[1] = epoch;
-                    gSwitchKeys[2] = epoch;
+                    gSwitchEpoch = epoch;
+                    tx_event_flags_set(&gEventFlags, KS_EVENT_SET_SWITCH, TX_OR);
                 }
                 break;
         }
@@ -357,15 +376,12 @@ KeyClientEntry(ULONG ignore)
 
     while (1) {
         if (!findMaster && !requestRekey && !getNewKey && !storeKey) {
-            status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
+            result = tx_event_flags_get(&gEventFlags,
+                    KS_EVENT_SET_KEYCLIENT, TX_OR_CLEAR, &flags, TX_NO_WAIT);
             if (status == TX_SUCCESS) {
-                findMaster = gFindMaster;
-                gFindMaster = 0;
-                getNewKey = gGetNewKey;
-                gGetNewKey = 0;
-                requestRekey = gRequestRekey;
-                gRequestRekey = 0;
-                tx_mutex_put(&gKeyStateMutex);
+                findMaster = (flags & KS_EVENT_FINDMASTER) != 0;
+                getNewKey = (flags & KS_EVENT_GETNEWKEY) != 0;
+                requestRekey = (flags & KS_EVENT_REQREKEY) != 0;
             }
             else {
                 WOLFLOCAL_LOG(2, "Couldn't get key state mutex to read\n");
@@ -412,10 +428,14 @@ KeyClientEntry(ULONG ignore)
                 WOLFLOCAL_LOG(3, "Key client got key\n");
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
                 KeyServer_SetKeyResp(&gKeyState, gHeapHint);
-                gKeySet[0] = 1;
-                gKeySet[1] = 1;
-                gKeySet[2] = 1;
-                storeKey = 0;
+                status = tx_event_flags_set(&gEventFlags,
+                                            KS_EVENT_SET_KEYSET, TX_OR);
+                if (status == TX_SUCCESS) {
+                    storeKey = 0;
+                }
+                else {
+                    WOLFLOCAL_LOG(2, "Couldn't set keyset flags\n");
+                }
                 tx_mutex_put(&gKeyStateMutex);
             }
             else {
@@ -529,7 +549,7 @@ WolfLocalInit(void)
     if (status != 0) {
         WOLFLOCAL_LOG(1, "WolfLocalInit couldn't get memory pool. (%d)\n", status);
     }
-    status = tx_event_flags_set(&gEventFlags, KS_EVENT_HEAP, TX_OR);
+    status = tx_event_flags_set(&gEventFlags, KS_EVENT_SET_INIT, TX_OR);
     if (status != TX_SUCCESS) {
         WOLFLOCAL_LOG(1, "couldn't set the heap ready flag\n");
         return;
@@ -623,10 +643,10 @@ void WolfLocalTimer(void)
                     WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
                 }
                 else {
+                    tx_event_flags_set(&gEventFlags, KS_EVENT_GETNEWKEY, TX_OR);
                     status = tx_mutex_get(&gKeyStateMutex,
                                           KS_TIMEOUT_KEY_STATE_WRITE);
                     if (status == TX_SUCCESS) {
-                        gGetNewKey = 1;
                         gRekeyPending = 1;
                         gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
                         tx_mutex_put(&gKeyStateMutex);
@@ -665,16 +685,10 @@ void WolfLocalTimer(void)
                     WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
                 }
                 else {
-                    status = tx_mutex_get(&gKeyStateMutex,
-                                          KS_TIMEOUT_KEY_STATE_WRITE);
-                    if (status == TX_SUCCESS) {
-                        gSwitchKeys[0] = gKeyServerEpoch;
-                        gSwitchKeys[1] = gKeyServerEpoch;
-                        gSwitchKeys[2] = gKeyServerEpoch;
-                        /* Should be an epoch number */
-                        gRekeyPending = 0;
-                        tx_mutex_put(&gKeyStateMutex);
-                    }
+                    gSwitchEpoch = gKeyServerEpoch;
+                    tx_event_flags_set(&gEventFlags,
+                                       KS_EVENT_SET_SWITCH, TX_OR);
+                    gRekeyPending = 0;
                 }
             }
         }
@@ -850,7 +864,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                      void* heap, UINT heapSz)
 {
     int ret;
-    int keySet = 0;
+    ULONG flags = 0;
 
     if (wrapper == NULL || heap == NULL || heapSz == 0 ||
         peerIdList == NULL || peerIdListSz == 0 ||
@@ -956,21 +970,23 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     }
 
     /* Wait for the first key. */
-    while (!keySet) {
-        WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
-        tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
-
-        ret = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
-        if (ret == TX_SUCCESS) {
-            WOLFLOCAL_LOG(3, "wolfCast getting key set flag\n");
-            keySet = gKeySet[streamId];
-            ret = tx_mutex_put(&gKeyStateMutex);
-        }
-        else {
-            WOLFLOCAL_LOG(3, "Couldn't get key mutex. Trying again.\n");
-        }
+    WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
+    ret = tx_event_flags_get(&gEventFlags, KS_EVENT_KEYSET(streamId),
+                             TX_OR, &flags, TX_WAIT_FOREVER);
+    if (flags) {
+        WOLFLOCAL_LOG(3, "Key has been set.\n");
     }
-    gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
+    if (ret == TX_SUCCESS) {
+        ret = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
+    }
+    if (ret == TX_SUCCESS) {
+        gSwitchEpoch = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
+        ret = tx_mutex_put(&gKeyStateMutex);
+        tx_event_flags_set(&gEventFlags, KS_EVENT_SWITCH(streamId), TX_OR);
+    }
+    else {
+        WOLFLOCAL_LOG(3, "Couldn't get key mutex\n");
+    }
 
 exit:
     return ret;
@@ -1005,7 +1021,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
             goto exit;
         }
     }
-    
+
     *ssl = newSsl;
     newSsl = NULL;
 
@@ -1028,27 +1044,31 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
     }
 
     if (!wrapper->keySet && !wrapper->switchKeys) {
+        ULONG checkFlags = KS_EVENT_KEYSET(wrapper->streamId) |
+                           KS_EVENT_SWITCH(wrapper->streamId),
+              flags = 0;
+
+        status = tx_event_flags_get(&gEventFlags, checkFlags,
+                                    TX_OR_CLEAR, &flags, TX_NO_WAIT);
+        if (status == TX_SUCCESS) {
+            wrapper->keySet = (flags & KS_EVENT_SET_KEYSET) != 0;
+            wrapper->switchKeys = (flags & KS_EVENT_SET_SWITCH) != 0;
+        }
+    }
+
+    if (wrapper->keySet) {
         status = tx_mutex_get(&gKeyStateMutex, KS_TIMEOUT_KEY_STATE_READ);
         if (status != TX_SUCCESS)
             goto exit;
 
-        wrapper->keySet = gKeySet[wrapper->streamId];
-        gKeySet[wrapper->streamId] = 0;
-        wrapper->switchKeys = gSwitchKeys[wrapper->streamId];
-        gSwitchKeys[wrapper->streamId] = 0;
-
-        if (wrapper->keySet) {
-            memcpy(&wrapper->keyState, &gKeyState, sizeof(gKeyState));
-        }
+        memcpy(&wrapper->keyState, &gKeyState, sizeof(gKeyState));
 
         status = tx_mutex_put(&gKeyStateMutex);
         if (status != TX_SUCCESS) {
             error = 1;
             goto exit;
         }
-    }
 
-    if (wrapper->keySet) {
         wrapper->keySet = 0;
         wrapper->newEpoch = (wrapper->keyState.epoch[0] << 8) |
                             wrapper->keyState.epoch[1];
@@ -1105,7 +1125,7 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
         }
         else {
             WOLFLOCAL_LOG(2, "Missed a key change.\n");
-            gGetNewKey = 1;
+            tx_event_flags_set(&gEventFlags, KS_EVENT_GETNEWKEY, TX_OR);
         }
 
         wrapper->switchKeys = 0;
@@ -1187,9 +1207,8 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
         ssl = wrapper->prevSsl;
     else if (epoch > wrapper->epoch) {
         /* We may have missed a new key update or a switch keys. */
-        gSwitchKeys[0] = epoch;
-        gSwitchKeys[1] = epoch;
-        gSwitchKeys[2] = epoch;
+        gSwitchEpoch = epoch;
+        tx_event_flags_set(&gEventFlags, KS_EVENT_SET_SWITCH, TX_OR);
 
         if (KeyServer_IsRunning()) {
             gKeyServerEpoch = epoch;
@@ -1199,10 +1218,10 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
                     WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
                 }
                 else {
+                    tx_event_flags_set(&gEventFlags, KS_EVENT_GETNEWKEY, TX_OR);
                     status = tx_mutex_get(&gKeyStateMutex,
                                           KS_TIMEOUT_KEY_STATE_WRITE);
                     if (status == TX_SUCCESS) {
-                        gGetNewKey = 1;
                         gRekeyPending = 1;
                         gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
                         tx_mutex_put(&gKeyStateMutex);

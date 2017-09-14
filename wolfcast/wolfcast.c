@@ -98,7 +98,7 @@ typedef struct wolfWrapper_t {
 
 static int gRekeyTrigger = 1;
 static int gKeySet[3];
-static int gSwitchKeys[3];
+static int gSwitchKeys[3] = { 1, 1, 1 };
 static KeyRespPacket_t gKeyState;
 static wolfWrapper_t gWrapper[3];
 static unsigned short gEpoch;
@@ -675,8 +675,7 @@ exit:
 
     #define GROUP_ADDR 0xE2000003
 
-extern UINT gGetNewKey;
-extern UINT gSwitchKeys[3];
+UINT gSwitchKeys[3];
 
 #endif
 
