@@ -24,6 +24,8 @@
 #include <wolfssl/wolfcrypt/memory.h>
 #include "wolfcast.h"
 #include "key-services.h"
+#include "key-client.h"
+#include "key-server.h"
 
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */

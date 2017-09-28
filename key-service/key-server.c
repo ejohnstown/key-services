@@ -1,5 +1,7 @@
 #include <pthread.h>
 #include "key-services.h"
+#include "key-client.h"
+#include "key-server.h"
 
 static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
 #define KEY_BCAST_PORT 22222

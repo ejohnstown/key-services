@@ -9,7 +9,7 @@ int mySeed(unsigned char*, unsigned int);
 unsigned int LowResTimer(void);
 
 
-void WolfLocalInit(void);
+void WolfLocalInit(UCHAR id);
 void WolfLocalTimer(void);
 
 
@@ -31,8 +31,6 @@ typedef struct wolfWrapper_t {
     UINT macDropCount;
     UINT replayDropCount;
     UINT epochDropCount;
-    KS_SOCKET_T txSocket;
-    KS_SOCKET_T rxSocket;
     NX_UDP_SOCKET realTxSocket;
     NX_UDP_SOCKET realRxSocket;
     NX_IP *ip;

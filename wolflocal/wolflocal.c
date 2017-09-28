@@ -1,6 +1,10 @@
 #include "types.h"
 #include "wolflocal.h"
 #include "key-services.h"
+#include "key-client.h"
+#ifndef NO_KEY_SERVER
+    #include "key-server.h"
+#endif
 #include "wolfcast.h"
 #include <wolfssl/error-ssl.h>
 
@@ -109,13 +113,15 @@ static void FilteredLog(int level, const char* fmt, ...)
 static TX_THREAD gKeyBcastUdpThread;
 static TX_THREAD gKeyClientThread;
 static TX_THREAD gWolfCastClientThread[3];
-static TX_THREAD gKeyServerThread;
-
 static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[3][KS_STACK_SZ];
-static char gKeyServerStack[KS_STACK_SZ];
 static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
+
+#ifndef NO_KEY_SERVER
+    static TX_THREAD gKeyServerThread;
+    static char gKeyServerStack[KS_STACK_SZ];
+#endif
 
 #ifdef WOLFSSL_STATIC_MEMORY
     #if defined(NETX) && defined(PGB002)
@@ -142,24 +148,24 @@ UINT gSwitchKeys[3] = { 1, 1, 1 };
 static KeyRespPacket_t gKeyState;
 static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
 static struct in_addr gKeySrvAddr = { 0 };
-static UINT gRekeyPending = 0;
-static UINT gSwitchKeyCount = 0;
-static UINT gUseKeyCount = 0;
 wolfWrapper_t gWrappers[3];
 ULONG gAddr = 0;
 ULONG gMask = 0;
 
+#ifndef NO_KEY_SERVER
+    static UINT gRekeyPending = 0;
+    static UINT gSwitchKeyCount = 0;
+    static UINT gUseKeyCount = 0;
+    /* Port number for the KeyBcast server all endpoints run. */
+    static unsigned short gBcastPort = 22222;
+    /* Port number for the KeyServer all endpoints run. */
+    static unsigned short gServPort = 11111;
+#endif
+
 /* Group address for the wolfCast multicast group. */
 static struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
-
 /* Port number for the wolfCast multicast group. */
 static unsigned short gGroupPort = 12345;
-
-/* Port number for the KeyBcast server all endpoints run. */
-static unsigned short gBcastPort = 22222;
-
-/* Port number for the KeyServer all endpoints run. */
-static unsigned short gServPort = 11111;
 
 
 const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID, OTHER_CLIENT_ID };
@@ -195,6 +201,8 @@ static int isAddrSet(void)
 }
 
 
+#ifndef NO_KEY_SERVER
+
 static void
 keyServerCb(CmdPacket_t* pkt)
 {
@@ -226,7 +234,8 @@ KeyServerEntry(ULONG ignore)
 
     {
         ULONG flags;
-        result = tx_event_flags_get(&gEventFlags, KS_EVENT_HEAP,
+        result = tx_event_flags_get(&gEventFlags,
+                                    (KS_EVENT_HEAP | KS_EVENT_ADDR),
                                     TX_AND, &flags, TX_WAIT_FOREVER);
         if (result == TX_SUCCESS)
             WOLFLOCAL_LOG(3, "KeyServerEntry got the start event (%u)\n",
@@ -239,9 +248,8 @@ KeyServerEntry(ULONG ignore)
         WOLFLOCAL_LOG(1, "KeyServer couldn't initialize wolfSSL.\n");
     }
 
-    while (!isAddrSet()) {
-        WOLFLOCAL_LOG(3, "Key server waiting for network.\n");
-        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
+    if (result != 0) {
+        WOLFLOCAL_LOG(1, "KeyServer couldn't initialize. (%d)\n", result);
     }
 
     {
@@ -249,12 +257,6 @@ KeyServerEntry(ULONG ignore)
         inaddr.s_addr = gAddr;
         result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
     }
-
-    if (result != 0) {
-        WOLFLOCAL_LOG(1, "KeyServer couldn't initialize. (%d)\n", result);
-    }
-
-    tx_event_flags_set(&gEventFlags, KS_EVENT_ADDR, TX_OR);
 
     if (result == 0) {
         result = KeyServer_Run(keyServerCb, gHeapHint);
@@ -267,6 +269,8 @@ KeyServerEntry(ULONG ignore)
     wolfSSL_Cleanup();
 }
 
+#endif /* !NO_KEY_SERVER */
+
 
 static void
 broadcastCb(CmdPacket_t* pkt)
@@ -274,10 +278,12 @@ broadcastCb(CmdPacket_t* pkt)
     unsigned char* msg;
     unsigned short epoch;
 
+#ifndef NO_KEY_SERVER
     if (KeyServer_IsRunning()) {
         WOLFLOCAL_LOG(3, "I am the key server, I should ignore my broadcasts.\n");
         return;
     }
+#endif
 
     if (pkt != NULL) {
         switch (pkt->header.type) {
@@ -316,12 +322,19 @@ KeyBcastUdpEntry(ULONG ignore)
 
     (void)ignore;
 
-    result = tx_event_flags_get(&gEventFlags, (KS_EVENT_HEAP | KS_EVENT_ADDR),
+    result = tx_event_flags_get(&gEventFlags, KS_EVENT_HEAP,
                                 TX_AND, &flags, TX_WAIT_FOREVER);
     if (result == TX_SUCCESS)
         WOLFLOCAL_LOG(3, "KeyBcastUdpEntry got the start event (%u)\n", flags);
     else
         WOLFLOCAL_LOG(1, "KeyBcastUdpEntry failed to get event flags\n");
+
+    while (!isAddrSet()) {
+        WOLFLOCAL_LOG(3, "Key server waiting for network.\n");
+        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
+    }
+
+    tx_event_flags_set(&gEventFlags, KS_EVENT_ADDR, TX_OR);
 
     result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
     if (result != 0) {
@@ -411,7 +424,9 @@ KeyClientEntry(ULONG ignore)
             if (status == TX_SUCCESS) {
                 WOLFLOCAL_LOG(3, "Key client got key\n");
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
+#ifndef NO_KEY_SERVER
                 KeyServer_SetKeyResp(&gKeyState, gHeapHint);
+#endif
                 gKeySet[0] = 1;
                 gKeySet[1] = 1;
                 gKeySet[2] = 1;
@@ -493,7 +508,7 @@ static void WolfLocalLog(const int logLevel, const char *const logMessage)
  * group key access. Creates threads for the Key Server, Key Client,
  * and the wolfCast demo application. */
 void
-WolfLocalInit(void)
+WolfLocalInit(UCHAR id)
 {
     UINT status;
     int i;
@@ -502,10 +517,7 @@ WolfLocalInit(void)
     if (status != TX_SUCCESS)
         WOLFLOCAL_LOG(1, "couldn't create event flags");
 
-    gPeerId = CLIENT_ID;
-#ifdef PGB002
-    KeyServer_Resume();
-#endif
+    gPeerId = id;
 
 #ifdef DEBUG_WOLFSSL
     wolfSSL_SetLoggingCb(WolfLocalLog);
@@ -547,6 +559,7 @@ WolfLocalInit(void)
         return;
     }
 
+#ifndef NO_KEY_SERVER
     status = tx_thread_create(&gKeyServerThread, "key service server",
                            KeyServerEntry, 0,
                            gKeyServerStack, sizeof(gKeyServerStack),
@@ -556,6 +569,7 @@ WolfLocalInit(void)
         WOLFLOCAL_LOG(1, "key server thread create failed = 0x%02X\n", status);
         return;
     }
+#endif
 
     status = tx_thread_create(&gKeyClientThread, "key service client",
                            KeyClientEntry, 0,
@@ -590,7 +604,6 @@ void WolfLocalTimer(void)
 {
     static unsigned int count = 0;
     UINT status;
-    int ret;
 
     if (count == 0) {
         ULONG flags = 0;
@@ -612,14 +625,14 @@ void WolfLocalTimer(void)
 
     count++;
 
+#ifndef NO_KEY_SERVER
     WOLFLOCAL_LOG(3, "timer: %u\n", count);
     /* Every X seconds on the 0, ... */
     if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
         WOLFLOCAL_LOG(3, "timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
         if (KeyServer_IsRunning()) {
             if (!gRekeyPending) {
-                ret = KeyServer_GenNewKey(gHeapHint);
-                if (ret) {
+                if (KeyServer_GenNewKey(gHeapHint)) {
                     WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
                 }
                 else {
@@ -644,7 +657,9 @@ void WolfLocalTimer(void)
 #endif /* WOLFLOCAL_TEST_KEY_REQUEST */
         }
     }
+#endif /* !NO_KEY_SERVER */
 
+#ifndef NO_KEY_SERVER
     if (gSwitchKeyCount && gUseKeyCount)
         gUseKeyCount = 0;
 
@@ -660,8 +675,7 @@ void WolfLocalTimer(void)
             WOLFLOCAL_LOG(3, "timer: 15 seconds later\n");
             if (KeyServer_IsRunning()) {
                 gUseKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
-                ret = KeyServer_NewKeyUse(gHeapHint);
-                if (ret) {
+                if (KeyServer_NewKeyUse(gHeapHint)) {
                     WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
                 }
                 else {
@@ -683,18 +697,23 @@ void WolfLocalTimer(void)
     if (gUseKeyCount) {
         gUseKeyCount--;
         if (gUseKeyCount != 0) {
-            ret = KeyServer_NewKeyUse(gHeapHint);
-            if (ret) {
+            if (KeyServer_NewKeyUse(gHeapHint)) {
                 WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
             }
         }
     }
+#endif /* !NO_KEY_SERVER */
 
     if ((count % WOLFLOCAL_STATS_PERIOD) == 0) {
-        unsigned int ks, mac, replay, epoch, i;
+        unsigned int mac, replay, epoch, i;
 
-        ks = KeyServer_GetAuthFailCount();
-        WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
+#ifndef NO_KEY_SERVER
+        {
+            unsigned int ks;
+            ks = KeyServer_GetAuthFailCount();
+            WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
+        }
+#endif
 
         for (i = 0; i < 3; i++) {
             wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
@@ -712,8 +731,7 @@ void WolfLocalTimer(void)
         if (!KeyServer_IsRunning()) {
             struct in_addr scratch;
             WOLFLOCAL_LOG(3, "finding the master\n");
-            ret = KeyClient_FindMaster(&scratch, gHeapHint);
-            if (ret != 0) {
+            if (KeyClient_FindMaster(&scratch, gHeapHint)) {
                 WOLFLOCAL_LOG(2,
                               "Key server didn't announce itself, "
                               "becoming master.\n");
@@ -867,8 +885,6 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     wrapper->groupPort = groupPort;
     wrapper->peerIdList = peerIdList;
     wrapper->peerIdListSz = peerIdListSz;
-    wrapper->txSocket = (KS_SOCKET_T)&wrapper->realTxSocket;
-    wrapper->rxSocket = (KS_SOCKET_T)&wrapper->realRxSocket;
 #ifdef PGB000
     wrapper->ip = &bsp_ip_system_bus;
     wrapper->pool = &bsp_pool_system_bus;
@@ -1005,7 +1021,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
             goto exit;
         }
     }
-    
+
     *ssl = newSsl;
     newSsl = NULL;
 
@@ -1190,7 +1206,7 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
         gSwitchKeys[0] = epoch;
         gSwitchKeys[1] = epoch;
         gSwitchKeys[2] = epoch;
-
+#ifndef NO_KEY_SERVER
         if (KeyServer_IsRunning()) {
             gKeyServerEpoch = epoch;
             if (!gRekeyPending) {
@@ -1210,6 +1226,7 @@ int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
                 }
             }
         }
+#endif /* !NO_KEY_SERVER */
     }
 
     if (ssl == NULL) {

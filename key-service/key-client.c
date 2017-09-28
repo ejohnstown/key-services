@@ -1,4 +1,6 @@
 #include "key-services.h"
+#include "key-client.h"
+#include "key-server.h"
 
 static volatile int gKeyChg = 0;
 static struct in_addr gKeySrvAddr;

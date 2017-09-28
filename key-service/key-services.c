@@ -3,6 +3,10 @@
 #include <string.h>
 
 #include "key-services.h"
+#include "key-client.h"
+#ifndef NO_KEY_SERVER
+    #include "key-server.h"
+#endif
 #include <wolfssl/error-ssl.h>
 
 /* 0=None, 1=Errors, 2=Verbose, 3=Debug */
@@ -38,7 +42,9 @@ static struct in_addr gBcastAddr;
 unsigned char         gPeerId = 0;
 static unsigned short gKeyServPort;
 static unsigned short gKeyBcastPort;
-static unsigned int   gAuthFailCount = 0;
+#ifndef NO_KEY_SERVER
+    static unsigned int   gAuthFailCount = 0;
+#endif
 
 #ifdef WOLFSSL_STATIC_MEMORY
     #if defined(NETX) && defined(PGB002)
@@ -53,7 +59,9 @@ static unsigned int   gAuthFailCount = 0;
          * be multiple clients. */
         static MEMORY_SECTION byte clientMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
     #endif
-    static MEMORY_SECTION byte serverMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
+    #ifndef NO_KEY_SERVER
+        static MEMORY_SECTION byte serverMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
+    #endif
 #endif
 
 enum {
@@ -72,6 +80,7 @@ static const int gRespPrivacy[CMD_PKT_TYPE_COUNT] = {
 static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     unsigned char* txMsg, int* rxMsgLen, unsigned char* rxMsg);
 
+#ifndef NO_KEY_SERVER
 /*
  * Identify which psk key to use.
  */
@@ -91,6 +100,7 @@ static unsigned int KeyServer_PskCb(WOLFSSL* ssl, const char* identity,
 
     return key_max_len;
 }
+#endif /* NO_KEY_SERVER */
 
 static inline void c16toa(unsigned short u16, unsigned char* a)
 {
@@ -138,6 +148,7 @@ static inline int BuildPacket(CmdPacket_t** pPkt, int type, int msgLen,
     return 0;
 }
 
+#ifndef NO_KEY_SERVER
 static int KeyReq_BuildKeyReq_Ex(unsigned short epoch,
     unsigned char* pms, int pmsSz,
     unsigned char* serverRandom, int serverRandomSz,
@@ -210,6 +221,7 @@ static int KeyReq_BuildKeyUse(void* heap)
     c16toa(gKeyServerEpoch, epoch);
     return BuildPacket(NULL, CMD_PKT_TYPE_KEY_USE, sizeof(epoch), epoch, heap);
 }
+#endif /* NO_KEY_SERVER */
 
 static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
 {
@@ -279,6 +291,8 @@ static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
 
     return ret;
 }
+
+#ifndef NO_KEY_SERVER
 
 int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
                    unsigned short keyBcastPort, unsigned short keyServPort)
@@ -373,128 +387,6 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
     #endif
         ret = -1;
     }
-
-    return ret;
-}
-
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap)
-{
-    int                 ret = 0;
-#ifdef HAVE_NETX
-    NX_UDP_SOCKET realSock;
-    KS_SOCKET_T listenfd = (KS_SOCKET_T)&realSock;
-#else
-    KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
-#endif
-    const unsigned long inAddrAny = INADDR_ANY;
-    int n;
-    CmdPacket_t reqPkt;
-    struct sockaddr_in clientAddr;
-    socklen_t clientAddrLen;
-
-    (void)heap;
-
-    if (gKeyBcastPort == 0) {
-        ret = -1;
-#if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyBcast_RunUdp Error: broadcast port not set\n");
-#endif
-        goto exit;
-    }
-
-    /* copy address to global for key change */
-    XMEMCPY(&gBcastAddr, srvAddr, sizeof(struct in_addr));
-
-    /* create socket */
-    ret = KeySocket_CreateUdpSocket(&listenfd);
-    if (ret != 0) {
-        goto exit;
-    }
-
-    /* setup socket as non-blocking */
-    KeySocket_SetNonBlocking(listenfd);
-
-    /* enable broadcast */
-    KeySocket_SetBroadcast(listenfd);
-
-    /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyBcastPort, 1);
-    if (ret != 0)
-        goto exit;
-
-    /* main loop for accepting and responding to clients */
-    while (gKeyServerStop == 0) {
-        /* wait for client */
-        clientAddrLen = sizeof(clientAddr);
-
-        XMEMSET(&reqPkt, 0, sizeof(CmdPacket_t));
-
-        /* get header */
-        ret = KeySocket_RecvFrom(listenfd, (char*)&reqPkt, sizeof(CmdPacket_t),
-            0, (struct sockaddr*)&clientAddr, &clientAddrLen);
-        if (ret > 0) {
-        #if KEY_SERVICE_LOGGING_LEVEL >= 2
-            unsigned char* addr = (unsigned char*)&clientAddr.sin_addr.s_addr;
-            printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
-        #endif
-            /* check request */
-            ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
-            if (ret < 0) {
-            #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("KeyBcast_RunUdp Error: KeyReq_Check failed %d\n", ret);
-            #endif
-                continue;
-            }
-
-            /* perform callback with packet */
-            if (reqCb)
-                reqCb(&reqPkt);
-
-            /* if we are key server then process incoming requests */
-            if (gKeyServerRunning) {
-                unsigned char* resp = NULL;
-
-                if (reqPkt.header.type == 0) {
-                    CmdPacket_t* pPkt;
-                    BuildPacket(&pPkt, 0, sizeof(gKeyServAddr),
-                                (unsigned char*)&gKeyServAddr, heap);
-                }
-                /* get response */
-                KeyReq_GetResp(reqPkt.header.type, &resp, &n);
-
-                /* write response */
-                ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
-                    (struct sockaddr*)&clientAddr, clientAddrLen);
-                if (ret != n) {
-                #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
-                #endif
-                }
-            }
-        }
-        else if (ret == WOLFSSL_CBIO_ERR_WANT_READ) {
-            /* no data (EAGAIN) */
-            KEY_SERVICE_SLEEP(KEY_SERVICE_RECV_TIMEOUT);
-            ret = 0;
-        }
-        else if (ret < 0) {
-        #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyBcast_RunUdp Error: RecvFrom %d\n", ret);
-        #endif
-        }
-    }
-
-exit:
-
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
-    if (ret != 0) {
-        printf("KeyBcast_RunUdp failure: %d\n", ret);
-    }
-#endif
-
-    KeySocket_Unlisten(gKeyBcastPort);
-    KeySocket_Close(&listenfd);
-    KeySocket_Delete(&listenfd);
 
     return ret;
 }
@@ -749,11 +641,13 @@ void KeyServer_Stop(void)
     gKeyServerStop = 1;
 }
 
+#endif /* NO_KEY_SERVER */
 
 
 /*----------------------------------------------------------------------------*/
 /* Client */
 /*----------------------------------------------------------------------------*/
+
 
 /*
  *psk client set up.
@@ -1188,6 +1082,129 @@ int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* ep
 {
     int msgLen = sizeof(EpochRespPacket_t);
     return KeyClient_GetNet(srvAddr, CMD_PKT_TYPE_KEY_NEW, (unsigned char*)epochResp, &msgLen, heap);
+}
+
+
+int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap)
+{
+    int                 ret = 0;
+#ifdef HAVE_NETX
+    NX_UDP_SOCKET realSock;
+    KS_SOCKET_T listenfd = (KS_SOCKET_T)&realSock;
+#else
+    KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
+#endif
+    const unsigned long inAddrAny = INADDR_ANY;
+    int n;
+    CmdPacket_t reqPkt;
+    struct sockaddr_in clientAddr;
+    socklen_t clientAddrLen;
+
+    (void)heap;
+
+    if (gKeyBcastPort == 0) {
+        ret = -1;
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("KeyBcast_RunUdp Error: broadcast port not set\n");
+#endif
+        goto exit;
+    }
+
+    /* copy address to global for key change */
+    XMEMCPY(&gBcastAddr, srvAddr, sizeof(struct in_addr));
+
+    /* create socket */
+    ret = KeySocket_CreateUdpSocket(&listenfd);
+    if (ret != 0) {
+        goto exit;
+    }
+
+    /* setup socket as non-blocking */
+    KeySocket_SetNonBlocking(listenfd);
+
+    /* enable broadcast */
+    KeySocket_SetBroadcast(listenfd);
+
+    /* setup socket listener */
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyBcastPort, 1);
+    if (ret != 0)
+        goto exit;
+
+    /* main loop for accepting and responding to clients */
+    while (gKeyServerStop == 0) {
+        /* wait for client */
+        clientAddrLen = sizeof(clientAddr);
+
+        XMEMSET(&reqPkt, 0, sizeof(CmdPacket_t));
+
+        /* get header */
+        ret = KeySocket_RecvFrom(listenfd, (char*)&reqPkt, sizeof(CmdPacket_t),
+            0, (struct sockaddr*)&clientAddr, &clientAddrLen);
+        if (ret > 0) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 2
+            unsigned char* addr = (unsigned char*)&clientAddr.sin_addr.s_addr;
+            printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+        #endif
+            /* check request */
+            ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
+            if (ret < 0) {
+            #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                printf("KeyBcast_RunUdp Error: KeyReq_Check failed %d\n", ret);
+            #endif
+                continue;
+            }
+
+            /* perform callback with packet */
+            if (reqCb)
+                reqCb(&reqPkt);
+
+            /* if we are key server then process incoming requests */
+            if (gKeyServerRunning) {
+                unsigned char* resp = NULL;
+
+                if (reqPkt.header.type == 0) {
+                    CmdPacket_t* pPkt;
+                    BuildPacket(&pPkt, 0, sizeof(gKeyServAddr),
+                                (unsigned char*)&gKeyServAddr, heap);
+                }
+                /* get response */
+                KeyReq_GetResp(reqPkt.header.type, &resp, &n);
+
+                /* write response */
+                ret = KeySocket_SendTo(listenfd, (char*)resp, n, 0,
+                    (struct sockaddr*)&clientAddr, clientAddrLen);
+                if (ret != n) {
+                #if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
+                #endif
+                }
+            }
+        }
+        else if (ret == WOLFSSL_CBIO_ERR_WANT_READ) {
+            /* no data (EAGAIN) */
+            KEY_SERVICE_SLEEP(KEY_SERVICE_RECV_TIMEOUT);
+            ret = 0;
+        }
+        else if (ret < 0) {
+        #if KEY_SERVICE_LOGGING_LEVEL >= 1
+            printf("KeyBcast_RunUdp Error: RecvFrom %d\n", ret);
+        #endif
+        }
+    }
+
+exit:
+
+#if KEY_SERVICE_LOGGING_LEVEL >= 2
+    if (ret != 0) {
+        printf("KeyBcast_RunUdp failure: %d\n", ret);
+    }
+#endif
+
+    KeySocket_Unlisten(gKeyBcastPort);
+    KeySocket_Close(&listenfd);
+    KeySocket_Delete(&listenfd);
+
+    return ret;
 }
 
 void KeyBcast_DefaultCb(CmdPacket_t* pkt)

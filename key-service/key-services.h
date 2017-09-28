@@ -1,8 +1,7 @@
-#ifndef _KEY_SERVICE_H_
-#define _KEY_SERVICE_H_
+#ifndef _KEY_SERVICES_H_
+#define _KEY_SERVICES_H_
 
 #include <stdint.h>
-#include "key-socket.h"
 
 #define PMS_SIZE       64 /* SHA256 Block size */
 #define RAND_SIZE      32
@@ -108,38 +107,4 @@ static const unsigned char g_TlsPsk[4] = {
     0x01, 0x02, 0x03, 0x04
 };
 
-
-/* API's */
-int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
-    unsigned short keyBcastPort, unsigned short keyServPort);
-typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
-int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
-int KeyServer_IsRunning(void);
-void KeyServer_Pause(void);
-void KeyServer_Resume(void);
-void KeyServer_Stop(void);
-int KeyServer_GenNewKey(void* heap);
-int KeyServer_SetKeyResp(KeyRespPacket_t* keyRespPkt, void* heap);
-int KeyServer_SetNewKey(unsigned short epoch,
-    unsigned char* pms, int pmsSz,
-    unsigned char* serverRandom, int serverRandomSz,
-    unsigned char* clientRandom, int clientRandomSz, void* heap);
-int KeyServer_NewKeyUse(void* heap);
-int KeyServer_NewKeyChange(void* heap);
-void KeyServer_Free(void* heap);
-unsigned int KeyServer_GetAuthFailCount(void);
-
-int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
-int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
-
-int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, void* heap);
-int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
-int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* epochResp, void* heap);
-
-/* Un-secure UDP broadcast listening service */
-typedef void (*KeyBcastReqPktCb)(CmdPacket_t* pkt);
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb respCb, void* heap);
-
-void KeyBcast_DefaultCb(CmdPacket_t* pkt);
-
-#endif /* _KEY_SERVICE_H_ */
+#endif /* _KEY_SERVICES_H_ */

@@ -24,7 +24,7 @@ all: wolfcast
 
 key-socket.o: ../key-service/key-socket.c ../key-service/key-socket.h
 
-key-services.o: ../key-service/key-services.c ../key-service/key-services.h ../key-service/key-socket.h
+key-services.o: ../key-service/key-services.c ../key-service/key-services.h ../key-service/key-server.h ../key-service/keyc-client.h ../key-service/key-socket.h
 
 wolfcast.o: wolfcast.c wolfcast.h
 

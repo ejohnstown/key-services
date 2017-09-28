@@ -7,6 +7,8 @@
 
 /* handles wolfSSL and socket includes */
 #include "key-services.h"
+#include "key-server.h"
+#include "key-client.h"
 
 #ifndef NETX
 /* additional *nix headers needed for threading, select and time */
