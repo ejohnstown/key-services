@@ -156,11 +156,12 @@ ULONG gMask = 0;
     static UINT gRekeyPending = 0;
     static UINT gSwitchKeyCount = 0;
     static UINT gUseKeyCount = 0;
-    /* Port number for the KeyBcast server all endpoints run. */
-    static unsigned short gBcastPort = 22222;
-    /* Port number for the KeyServer all endpoints run. */
-    static unsigned short gServPort = 11111;
 #endif
+
+/* Port number for the KeyBcast server all endpoints run. */
+static unsigned short gBcastPort = 22222;
+/* Port number for the KeyServer all endpoints run. */
+static unsigned short gServPort = 11111;
 
 /* Group address for the wolfCast multicast group. */
 static struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
@@ -174,7 +175,6 @@ const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID, OTHER_CLIENT_ID };
 
 extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
-extern unsigned char gPeerId;
 
 #define KS_EVENT_HEAP (1 << 0)
 #define KS_EVENT_ADDR (1 << 1)
@@ -255,7 +255,7 @@ KeyServerEntry(ULONG ignore)
     {
         struct in_addr inaddr;
         inaddr.s_addr = gAddr;
-        result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
+        result = KeyServer_Init(gHeapHint, &inaddr);
     }
 
     if (result == 0) {
@@ -517,7 +517,7 @@ WolfLocalInit(UCHAR id)
     if (status != TX_SUCCESS)
         WOLFLOCAL_LOG(1, "couldn't create event flags");
 
-    gPeerId = id;
+    KeyServices_Init(id, gBcastPort, gServPort);
 
 #ifdef DEBUG_WOLFSSL
     wolfSSL_SetLoggingCb(WolfLocalLog);

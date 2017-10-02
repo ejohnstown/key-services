@@ -26,6 +26,7 @@
 
 #define KEY_SERVICE_RECV_TIMEOUT (1 * KEY_SERVICE_TICKS_PER_SECOND)
 
+
 /*----------------------------------------------------------------------------*/
 /* Server */
 /*----------------------------------------------------------------------------*/
@@ -39,7 +40,7 @@ static int            gKeyServerStop = 0;
        unsigned short gKeyServerEpoch;
 static struct in_addr gKeyServAddr;
 static struct in_addr gBcastAddr;
-unsigned char         gPeerId = 0;
+static unsigned char  gPeerId = 0;
 static unsigned short gKeyServPort;
 static unsigned short gKeyBcastPort;
 #ifndef NO_KEY_SERVER
@@ -294,15 +295,12 @@ static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
 
 #ifndef NO_KEY_SERVER
 
-int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
-                   unsigned short keyBcastPort, unsigned short keyServPort)
+int KeyServer_Init(void* heap, const struct in_addr* srvAddr)
 {
     int ret = 0;
 
     if (++gKeyServerInitDone == 1) {
         gKeyServAddr = *srvAddr;
-        gKeyBcastPort = keyBcastPort;
-        gKeyServPort = keyServPort;
 
         /* init each command type */
         ret = KeyReq_BuildKeyReq(heap);
@@ -1083,6 +1081,17 @@ int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* ep
     int msgLen = sizeof(EpochRespPacket_t);
     return KeyClient_GetNet(srvAddr, CMD_PKT_TYPE_KEY_NEW, (unsigned char*)epochResp, &msgLen, heap);
 }
+
+void KeyServices_Init(unsigned char peerId,
+                      unsigned short bcastPort, unsigned short servPort)
+{
+    /* Port numbers are used by both the clients and servers. */
+    gPeerId = peerId;
+    gKeyBcastPort = bcastPort;
+    gKeyServPort = servPort;
+}
+
+
 
 
 int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap)

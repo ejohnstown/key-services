@@ -5,6 +5,8 @@
 #include "key-socket.h"
 
 /* API's */
+void KeyServices_Init(unsigned char peerId, unsigned short bcastPort, unsigned short servPort);
+
 int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
 int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
 

@@ -5,8 +5,7 @@
 #include "key-socket.h"
 
 /* API's */
-int KeyServer_Init(void* heap, const struct in_addr* srvAddr,
-    unsigned short keyBcastPort, unsigned short keyServPort);
+int KeyServer_Init(void* heap, const struct in_addr* srvAddr);
 typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
 int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
 int KeyServer_IsRunning(void);

@@ -33,8 +33,6 @@
     #define WOLFCAST_LOGGING_LEVEL 0
 #endif
 
-extern unsigned char gPeerId;
-
 #ifndef NETX
 
     #include <stdlib.h>
@@ -1108,11 +1106,12 @@ main(
         ShowUsage();
     }
 
+    KeyServices_Init(myId, 22222, 11111);
+
     if (!error) {
         signal(SIGPIPE, SIG_IGN);
 
-        gPeerId = myId;
-        error = KeyServer_Init(NULL, &keySrvAddr, 22222, 11111);
+        error = KeyServer_Init(NULL, &keySrvAddr);
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
             WCERR("couldn't init key service");
