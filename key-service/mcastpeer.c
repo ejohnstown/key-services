@@ -526,7 +526,8 @@ int main(int argc, char** argv)
 
     {
         struct in_addr ipaddr = { .s_addr = KEY_SERVER_IP };
-        ret = KeyServer_Init(heap, &ipaddr, KEY_BCAST_PORT, KEY_SERVER_PORT);
+        KeyServices_Init(0, KEY_BCAST_PORT, KEY_SERVER_PORT);
+        ret = KeyServer_Init(heap, &ipaddr);
     }
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
