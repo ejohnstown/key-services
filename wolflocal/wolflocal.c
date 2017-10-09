@@ -450,12 +450,13 @@ KeyClientEntry(ULONG ignore)
  * now local variables. It will wait for the flag for the key
  * getting set to go true before starting to broadcast. */
 static void
-WolfCastClientEntry(ULONG streamId)
+WolfCastClientEntry(ULONG arg)
 {
-    wolfWrapper_t* wrapper;
+    wolfWrapper_t* wrapper = (wolfWrapper_t*)arg;
     unsigned int txTime;
     unsigned int txCount;
     int error;
+
 
     {
         ULONG flags = 0;
@@ -468,13 +469,27 @@ WolfCastClientEntry(ULONG streamId)
             WOLFLOCAL_LOG(1, "WolfCastClientEntry failed to get event flags\n");
     }
 
-    wrapper = &gWrappers[streamId];
+    if (!error) {
+        UINT keySet = gKeySet[wrapper->streamId];
 
-    error = wolfWrapper_Init(wrapper, streamId, gPeerId,
-                             gGroupPort + streamId, gGroupAddr.s_addr,
-                             gPeerIdList, PEER_ID_LIST_SZ,
-                             gWolfCastMemory[streamId],
-                             sizeof(gWolfCastMemory[streamId]));
+        /* Wait for the first key. */
+        do {
+            WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
+            tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
+
+            error = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
+            if (error == TX_SUCCESS) {
+                WOLFLOCAL_LOG(3, "wolfCast getting key set flag\n");
+                keySet = gKeySet[wrapper->streamId];
+                error = tx_mutex_put(&gKeyStateMutex);
+            }
+            else {
+                WOLFLOCAL_LOG(3, "Couldn't get key mutex. Trying again.\n");
+            }
+        } while (!keySet);
+
+        gSwitchKeys[wrapper->streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
+    }
 
     if (!error)
         error = WolfcastClientInit(&txTime, &txCount);
@@ -487,7 +502,7 @@ WolfCastClientEntry(ULONG streamId)
             tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
     }
 
-    WOLFLOCAL_LOG(3, "wolfCast thread %u ended.\n", streamId);
+    WOLFLOCAL_LOG(3, "wolfCast thread %u ended.\n", wrapper->streamId);
 }
 
 
@@ -582,8 +597,20 @@ WolfLocalInit(UCHAR id)
     }
 
     for (i = 0; i < 3; i++) {
+        status = wolfWrapper_Init(&gWrappers[i], i, id,
+                                  gGroupPort + i, gGroupAddr.s_addr,
+                                  gPeerIdList, PEER_ID_LIST_SZ,
+                                  gWolfCastMemory[i],
+                                  sizeof(gWolfCastMemory[i]));
+        if (status != TX_SUCCESS) {
+            WOLFLOCAL_LOG(1,
+                          "wolfCast client wrapper %u create failed = 0x%02X\n",
+                          i, status);
+            return;
+        }
+
         status = tx_thread_create(&gWolfCastClientThread[i], "wolfCast client",
-                               WolfCastClientEntry, i,
+                               WolfCastClientEntry, (ULONG)&gWrappers[i],
                                gWolfCastClientStack[i],
                                sizeof(gWolfCastClientStack[i]),
                                KS_PRIORITY, KS_THRESHOLD,
@@ -867,8 +894,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                      const USHORT *peerIdList, UINT peerIdListSz,
                      void* heap, UINT heapSz)
 {
-    int ret;
-    int keySet = 0;
+    int ret = 0;
 
     if (wrapper == NULL || heap == NULL || heapSz == 0 ||
         peerIdList == NULL || peerIdListSz == 0 ||
@@ -898,6 +924,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
                                          heap, heapSz, 0, 2);
     if (ret != SSL_SUCCESS) {
         WOLFLOCAL_LOG(1, "unable to load static memory and create ctx\n");
+        ret = -1;
         goto exit;
     }
 
@@ -906,6 +933,7 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     ret = wolfSSL_CTX_mcast_set_member_id(wrapper->ctx, myId);
     if (ret != SSL_SUCCESS) {
         WOLFLOCAL_LOG(1, "set mcast member id error\n");
+        ret = -1;
         goto exit;
     }
 
@@ -970,23 +998,6 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
         WOLFLOCAL_LOG(1, "setsockopt mc add membership failed\n");
         goto exit;
     }
-
-    /* Wait for the first key. */
-    while (!keySet) {
-        WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
-        tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
-
-        ret = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
-        if (ret == TX_SUCCESS) {
-            WOLFLOCAL_LOG(3, "wolfCast getting key set flag\n");
-            keySet = gKeySet[streamId];
-            ret = tx_mutex_put(&gKeyStateMutex);
-        }
-        else {
-            WOLFLOCAL_LOG(3, "Couldn't get key mutex. Trying again.\n");
-        }
-    }
-    gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
 
 exit:
     return ret;

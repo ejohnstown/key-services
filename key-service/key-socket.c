@@ -93,6 +93,9 @@ int KeySocket_CreateUdpSocket(KS_SOCKET_T* pSockfd)
     }
 
     KeySocket_SetSockOpt(*pSockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#ifdef SO_REUSEPORT
+    KeySocket_SetSockOpt(*pSockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
 #endif /* HAVE_NETX */
 
     return ret;

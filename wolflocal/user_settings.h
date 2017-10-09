@@ -55,10 +55,10 @@
  * calls printf() directly, and if you don't have it you'll get an error. */
 #endif
 
-#define WOLFSSL_MAX_MTU 256
-#define WOLFMEM_BUCKETS 64,128,256,384,1024,4680
-#define WOLFMEM_DIST 14,4,6,8,4,4
-#define WOLFMEM_MAX_BUCKETS 6
+#define WOLFSSL_MAX_MTU 512
+#define WOLFMEM_BUCKETS 64,128,256,384,512,1024,4680
+#define WOLFMEM_DIST 14,4,6,8,2,2,4
+#define WOLFMEM_MAX_BUCKETS 7
 /* The static memory size is based on the above constants, and calculated
  * by the function wolfSSL_StaticBufferSz(). */
 #define WOLFLOCAL_STATIC_MEMORY_SZ 30000

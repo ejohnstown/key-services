@@ -14,7 +14,7 @@
     #define KEY_SERVICE_LOGGING_LEVEL   0
 #endif
 
-//#define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
+#define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
 #ifdef HAVE_NETX
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
@@ -283,6 +283,14 @@ static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
                                   privacy == CMD_PKT_PUBLIC) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyReq_Check: Invalid privacy for request\n");
+    #endif
+        return -1;
+    }
+
+    /* check id - if id is mine, reject */
+    if (reqPkt->header.id == gPeerId) {
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("KeyReq_Check: Received my own packet, ignoring\n");
     #endif
         return -1;
     }

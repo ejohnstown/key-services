@@ -8,6 +8,8 @@ static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
 #define KEY_BCAST_PORT 22222
 #define KEY_SERV_PORT 11111
 
+#define KEY_SERVICE_CLIENT_TIMEOUT (1 * KEY_SERVICE_TICKS_PER_SECOND)
+
 
 #ifndef NETX
     #include <pthread.h>
@@ -46,6 +48,7 @@ int main(int argc, char **argv)
     void* heap = NULL;
     char* srvIp;
     unsigned char* addr;
+    int myId = 0;
 #ifndef NETX
     pthread_t tid;
 #endif
@@ -53,13 +56,17 @@ int main(int argc, char **argv)
     XMEMSET(&gKeySrvAddr, 0, sizeof(gKeySrvAddr));
 
     /* optionally include an ip address of this will flag */
-    if (argc != 2) {
-        printf("Usage: key-client <server IP>\n");
+    if (argc != 3) {
+        printf("Usage: key-client [id [serverip]]\n");
     }
 
     if (argc > 1) {
+        myId = atoi(argv[1]);
+    }
+
+    if (argc > 2) {
         /* parse server IP */
-        srvIp = argv[1];
+        srvIp = argv[2];
 
         /* converts IPv4 addresses from text to binary form */
         ret = inet_pton(AF_INET, srvIp, &gKeySrvAddr);
@@ -83,7 +90,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    KeyServices_Init(0, KEY_BCAST_PORT, KEY_SERV_PORT);
+    KeyServices_Init(myId, KEY_BCAST_PORT, KEY_SERV_PORT);
     ret = KeyServer_Init(heap, &gKeySrvAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
@@ -116,7 +123,7 @@ restart:
     printf("KeyClient_GetKey: ret %d\n", ret);
 
     while (gKeyChg == 0) {
-        KEY_SERVICE_SLEEP(100);
+        KEY_SERVICE_SLEEP(KEY_SERVICE_CLIENT_TIMEOUT);
     }
 
 exit:
