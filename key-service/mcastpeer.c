@@ -53,7 +53,6 @@ static struct in_addr gKeySrvAddr;
 static const struct in_addr gKeySrvAddrDef = { .s_addr = KEY_SERVER_IP };
 static const struct in_addr gGroupAddr = { .s_addr = GROUP_ADDR };
 static const struct in_addr gAnyAddr = { .s_addr = INADDR_ANY };
-static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
 static volatile int gKeyChg = 0;
 
 static int seq_cb(word16 peerId, word32 maxSeq, word32 curSeq, void* ctx)
@@ -170,7 +169,7 @@ static void* PeerThread(void* arg)
     gettimeofday(&start, NULL);
 
     /* set the broadcast address */
-    XMEMCPY(&gKeySrvAddr.s_addr, gBcastAddr, sizeof(gKeySrvAddr.s_addr));
+    gKeySrvAddr.s_addr = -1;
 
     /* find master using UDP broadcast message */
     ret = KeyClient_FindMaster(&gKeySrvAddr, heap);
@@ -397,8 +396,7 @@ static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
 static void* KeyBcastUdpThread(void* arg)
 {
     void* heap = arg;
-    struct in_addr srvAddr;
-    XMEMCPY(&srvAddr.s_addr, gBcastAddr, sizeof(srvAddr.s_addr));
+    struct in_addr srvAddr = {-1};
 
     KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
 

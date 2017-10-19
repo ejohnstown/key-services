@@ -3,7 +3,6 @@
 #include "key-client.h"
 #include "key-server.h"
 
-static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
 #define KEY_BCAST_PORT 22222
 #define KEY_SERV_PORT 11111
 
@@ -19,8 +18,7 @@ static void* KeyBcastThread(void* arg)
 {
     int ret;
     void* heap = arg;
-    struct in_addr srvAddr;
-    XMEMCPY(&srvAddr.s_addr, gBcastAddr, sizeof(srvAddr.s_addr));
+    struct in_addr srvAddr = {-1};
 
     ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
 
@@ -79,14 +77,21 @@ int main(int argc, char **argv)
     pthread_t tid;
     struct in_addr myAddr;
 
-    (void)argc;
-    (void)argv;
-
 #if defined(DEBUG_WOLFSSL)
     wolfSSL_Debugging_ON();
 #endif
 
-    inet_pton(AF_INET, "192.168.1.154", &myAddr);
+    if (argc < 2) {
+        printf("Error: provide IP address.\n");
+        goto exit;
+    }
+
+    ret = inet_pton(AF_INET, argv[1], &myAddr);
+    if (ret != 1) {
+        printf("Error: the IP address \'%s\' isn't parsable.\n", argv[1]);
+        goto exit;
+    }
+
     ret = wolfSSL_Init();
     if (ret != SSL_SUCCESS) {
         printf("Error: wolfSSL_Init\n");

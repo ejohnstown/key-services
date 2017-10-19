@@ -1,10 +1,9 @@
-#include "key-services.h"
 #include "key-client.h"
 #include "key-server.h"
 
 static volatile int gKeyChg = 0;
 static struct in_addr gKeySrvAddr;
-static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
+
 #define KEY_BCAST_PORT 22222
 #define KEY_SERV_PORT 11111
 
@@ -25,14 +24,16 @@ static const unsigned char gBcastAddr[] = {KEY_BCAST_ADDR};
             printf("Key Change Server: %d.%d.%d.%d\n",
                 addr[0], addr[1], addr[2], addr[3]);
         }
+        if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_USE) {
+            printf("SWITCHING!\n");
+        }
     }
 
     static void* KeyBcastThread(void* arg)
     {
         int ret;
         void* heap = arg;
-        struct in_addr srvAddr;
-        XMEMCPY(&srvAddr.s_addr, gBcastAddr, sizeof(srvAddr.s_addr));
+        struct in_addr srvAddr = {-1};
 
         ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
 
@@ -77,7 +78,7 @@ int main(int argc, char **argv)
     }
     else {
         /* use broadcast */
-        XMEMCPY(&gKeySrvAddr.s_addr, gBcastAddr, sizeof(gKeySrvAddr.s_addr));
+        gKeySrvAddr.s_addr = -1;
     }
 
 #if defined(DEBUG_WOLFSSL)
