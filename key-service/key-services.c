@@ -222,6 +222,15 @@ static int KeyReq_BuildKeyUse(void* heap)
     c16toa(gKeyServerEpoch, epoch);
     return BuildPacket(NULL, CMD_PKT_TYPE_KEY_USE, sizeof(epoch), epoch, heap);
 }
+
+static int KeyReq_BuildKeyChange(void* heap)
+{
+    unsigned char pkt[sizeof(struct in_addr) + EPOCH_SIZE];
+
+    XMEMCPY(pkt, (const unsigned char*)&gKeyServAddr, sizeof(struct in_addr));
+    c16toa(gKeyServerEpoch, pkt + sizeof(struct in_addr));
+    return BuildPacket(NULL, CMD_PKT_TYPE_KEY_CHG, sizeof(pkt), pkt, heap);
+}
 #endif /* NO_KEY_SERVER */
 
 static void KeyReq_GetResp(int type, unsigned char** resp, int* respLen)
@@ -317,13 +326,11 @@ int KeyServer_Init(void* heap, const struct in_addr* srvAddr)
         ret = KeyReq_BuildKeyUse(heap);
         if (ret != 0)
             return ret;
-
-        ret = BuildPacket(NULL, CMD_PKT_TYPE_DISCOVER,
-                          sizeof(*srvAddr), (unsigned char *)srvAddr,
-                          heap);
+        ret = KeyReq_BuildKeyChange(heap);
         if (ret != 0)
             return ret;
-        ret = BuildPacket(NULL, CMD_PKT_TYPE_KEY_CHG,
+
+        ret = BuildPacket(NULL, CMD_PKT_TYPE_DISCOVER,
                           sizeof(*srvAddr), (unsigned char *)srvAddr,
                           heap);
         if (ret != 0)
@@ -610,7 +617,8 @@ int KeyServer_NewKeyUse(void* heap)
     ret = KeyReq_BuildKeyUse(heap);
 
     if (ret == 0) {
-        ret = KeyClient_NetUdpBcast(&gBcastAddr,
+		struct in_addr any = { 0 };
+        ret = KeyClient_NetUdpBcast(&any,
             gRespPktLen[CMD_PKT_TYPE_KEY_USE],
             (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_USE], 0, NULL);
     }
@@ -620,11 +628,18 @@ int KeyServer_NewKeyUse(void* heap)
 
 int KeyServer_NewKeyChange(void* heap)
 {
-    (void)heap;
+    int ret;
 
-    return KeyClient_NetUdpBcast(&gBcastAddr,
-        gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
-        (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
+    ret = KeyReq_BuildKeyChange(heap);
+
+    if (ret == 0) {
+		struct in_addr any = { 0 };
+        ret = KeyClient_NetUdpBcast(&any,
+            gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
+            (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
+    }
+
+    return ret;
 }
 
 int KeyServer_IsRunning(void)
@@ -853,7 +868,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     struct timeval to = {1, 0};
 #endif
     struct sockaddr_in clientAddr;
-    socklen_t clientAddrLen = sizeof(clientAddr);
+	socklen_t clientAddrLen = sizeof(clientAddr);
     int n;
 
     if (gKeyBcastPort == 0) {
@@ -878,6 +893,11 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     clientAddr.sin_port = htons(gKeyBcastPort);
 #ifndef HAVE_NETX
     clientAddr.sin_addr = *srvAddr;
+    ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr,
+        0, 1);
+    if (ret != 0) {
+        goto exit;
+    }
     KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));
 #else
     (void)srvAddr;
@@ -901,7 +921,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 
     /* send broadcast */
     ret = KeySocket_SendTo(sockfd, (char*)txMsg, txMsgLen, 0,
-        (struct sockaddr*)&clientAddr, clientAddrLen);
+        (struct sockaddr*)&clientAddr, sizeof(clientAddr));
     if (ret != txMsgLen) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyClient_NetUdpBcast Error: KeySocket_SendTo %d\n", ret);

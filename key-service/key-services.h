@@ -65,6 +65,11 @@ typedef struct EpochRespPacket {
     unsigned char epoch[EPOCH_SIZE];
 } WOLFSSL_PACK EpochRespPacket_t;
 
+typedef struct EpochAddrRespPacket {
+    unsigned char ipaddr[4];
+    unsigned char epoch[EPOCH_SIZE];
+} WOLFSSL_PACK EpochAddrRespPacket_t;
+
 /* Command Header */
 typedef struct CmdHeader {
     unsigned char version; /* Version = 1 - Allows future protocol changes */
@@ -77,12 +82,12 @@ typedef union CmdMsg {
     unsigned char     raw[0];
 
     /* public responses */
-    AddrRespPacket_t  keyChgResp;
-    AddrRespPacket_t  discResp;
-    EpochRespPacket_t epochResp;
+    EpochAddrRespPacket_t  keyChgResp;
+    AddrRespPacket_t       discResp;
+    EpochRespPacket_t      epochResp;
 
     /* private responses */
-    KeyRespPacket_t   keyResp;
+    KeyRespPacket_t        keyResp;
 } WOLFSSL_PACK CmdMsg_t;
 
 /* Command Packet */

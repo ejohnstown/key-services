@@ -6,6 +6,14 @@
 #define KEY_BCAST_PORT 22222
 #define KEY_SERV_PORT 11111
 
+
+typedef struct params_t {
+	struct in_addr myAddr;
+	struct in_addr bcastAddr;
+	void* heap;
+} params_t;
+
+
 static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
 {
     if (pkt && pkt->header.type == CMD_PKT_TYPE_DISCOVER) {
@@ -16,11 +24,12 @@ static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
 
 static void* KeyBcastThread(void* arg)
 {
+	params_t* params = (params_t*)arg;
     int ret;
-    void* heap = arg;
-    struct in_addr srvAddr = {-1};
 
-    ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
+    ret = KeyBcast_RunUdp(&params->bcastAddr,
+		                  KeyBcastReqPktCallback,
+						  params->heap);
 
     return (void*)((size_t)ret);
 }
@@ -28,8 +37,8 @@ static void* KeyBcastThread(void* arg)
 
 static void* RekeyThread(void* arg)
 {
+	void* heap = ((params_t*)arg)->heap;
     int ret;
-    void* heap = arg;
 
     while (1) {
         sleep(30);
@@ -73,24 +82,31 @@ static void KeyServerReqPktCallback(CmdPacket_t* pkt)
 int main(int argc, char **argv)
 {
     int ret = 0;
-    void* heap = NULL;
     pthread_t tid;
-    struct in_addr myAddr;
+	params_t params;
 
 #if defined(DEBUG_WOLFSSL)
     wolfSSL_Debugging_ON();
 #endif
 
-    if (argc < 2) {
-        printf("Error: provide IP address.\n");
+    if (argc < 3) {
+        printf("Usage: %s <address> <bcast address>\n", argv[0]);
         goto exit;
     }
 
-    ret = inet_pton(AF_INET, argv[1], &myAddr);
+    ret = inet_pton(AF_INET, argv[1], &params.myAddr);
     if (ret != 1) {
         printf("Error: the IP address \'%s\' isn't parsable.\n", argv[1]);
         goto exit;
     }
+
+    ret = inet_pton(AF_INET, argv[2], &params.bcastAddr);
+    if (ret != 1) {
+        printf("Error: the IP address \'%s\' isn't parsable.\n", argv[2]);
+        goto exit;
+    }
+
+	params.heap = NULL;
 
     ret = wolfSSL_Init();
     if (ret != SSL_SUCCESS) {
@@ -99,7 +115,7 @@ int main(int argc, char **argv)
     }
 
     KeyServices_Init(0, KEY_BCAST_PORT, KEY_SERV_PORT);
-    ret = KeyServer_Init(heap, &myAddr);
+    ret = KeyServer_Init(params.heap, &params.myAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();
@@ -107,14 +123,14 @@ int main(int argc, char **argv)
     }
 
     /* spin up another thread for UDP broadcast */
-    ret = pthread_create(&tid, NULL, KeyBcastThread, heap);
+    ret = pthread_create(&tid, NULL, KeyBcastThread, &params);
     if (ret < 0) {
         printf("Pthread create failed for UDP\n");
         goto exit;
     }
     pthread_detach(tid);
 
-    ret = pthread_create(&tid, NULL, RekeyThread, heap);
+    ret = pthread_create(&tid, NULL, RekeyThread, &params);
     if (ret < 0) {
         printf("Pthread create failed for Rekey\n");
         goto exit;
@@ -122,11 +138,11 @@ int main(int argc, char **argv)
     pthread_detach(tid);
 
     KeyServer_Resume();
-    ret = KeyServer_Run(KeyServerReqPktCallback, heap);
+    ret = KeyServer_Run(KeyServerReqPktCallback, params.heap);
 
 exit:
 
-    KeyServer_Free(heap);
+    KeyServer_Free(params.heap);
     wolfSSL_Cleanup();
 
     return ret;

@@ -2,7 +2,9 @@
 #include "key-server.h"
 
 static volatile int gKeyChg = 0;
+static struct in_addr gMyAddr;
 static struct in_addr gKeySrvAddr;
+static unsigned short gCurEpoch = 0;
 
 #define KEY_BCAST_PORT 22222
 #define KEY_SERV_PORT 11111
@@ -18,14 +20,26 @@ static struct in_addr gKeySrvAddr;
         if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
             /* trigger key change */
             unsigned char* addr = pkt->msg.keyChgResp.ipaddr;
-            XMEMCPY(&gKeySrvAddr.s_addr, addr, sizeof(gKeySrvAddr.s_addr));
-            gKeyChg = 1;
+            unsigned short epoch;
 
-            printf("Key Change Server: %d.%d.%d.%d\n",
-                addr[0], addr[1], addr[2], addr[3]);
+            XMEMCPY(&gKeySrvAddr.s_addr, addr, sizeof(gKeySrvAddr.s_addr));
+            epoch = pkt->msg.keyChgResp.epoch[0] << 8 |
+                    pkt->msg.keyChgResp.epoch[1];
+            if (gCurEpoch != epoch) {
+                gCurEpoch = epoch;
+                gKeyChg = 1;
+            }
+
+            printf("Key Change Server: %d.%d.%d.%d; epoch: %u\n",
+                addr[0], addr[1], addr[2], addr[3], epoch);
         }
         if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_USE) {
-            printf("SWITCHING!\n");
+            unsigned short epoch;
+
+            epoch = pkt->msg.epochResp.epoch[0] << 8 |
+                    pkt->msg.epochResp.epoch[1];
+            if (epoch == gCurEpoch)
+                printf("SWITCHING!\n");
         }
     }
 
@@ -47,38 +61,30 @@ int main(int argc, char **argv)
     int ret;
     KeyRespPacket_t keyResp;
     void* heap = NULL;
-    char* srvIp;
     unsigned char* addr;
-    int myId = 0;
+    int myId;
+    const char* myIp;
 #ifndef NETX
     pthread_t tid;
 #endif
 
-    XMEMSET(&gKeySrvAddr, 0, sizeof(gKeySrvAddr));
+    XMEMSET(&gMyAddr, 0, sizeof(gMyAddr));
 
-    /* optionally include an ip address of this will flag */
     if (argc != 3) {
-        printf("Usage: key-client [id [serverip]]\n");
+        printf("Usage: key-client id ip\n");
+        goto exit;
     }
 
-    if (argc > 1) {
-        myId = atoi(argv[1]);
-    }
+    myId = atoi(argv[1]);
 
-    if (argc > 2) {
-        /* parse server IP */
-        srvIp = argv[2];
+    /* parse my IP */
+    myIp = argv[2];
 
-        /* converts IPv4 addresses from text to binary form */
-        ret = inet_pton(AF_INET, srvIp, &gKeySrvAddr);
-        if (ret != 1) {
-            printf("inet_pton error %d\n", ret);
-            return -1;
-        }
-    }
-    else {
-        /* use broadcast */
-        gKeySrvAddr.s_addr = -1;
+    /* converts IPv4 addresses from text to binary form */
+    ret = inet_pton(AF_INET, myIp, &gMyAddr);
+    if (ret != 1) {
+        printf("inet_pton error %d\n", ret);
+        return -1;
     }
 
 #if defined(DEBUG_WOLFSSL)
@@ -92,7 +98,7 @@ int main(int argc, char **argv)
     }
 
     KeyServices_Init(myId, KEY_BCAST_PORT, KEY_SERV_PORT);
-    ret = KeyServer_Init(heap, &gKeySrvAddr);
+    ret = KeyServer_Init(heap, &gMyAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
         wolfSSL_Cleanup();
@@ -109,6 +115,7 @@ int main(int argc, char **argv)
     pthread_detach(tid);
 #endif
 
+    gKeySrvAddr = gMyAddr;
     ret = KeyClient_FindMaster(&gKeySrvAddr, heap);
     if (ret != 0) {
         printf("unable to find master %d\n", ret);
