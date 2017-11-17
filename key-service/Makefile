@@ -26,7 +26,7 @@ THREADX_PATH=./ThreadX/ver5.6
 # Build wolfSSL with Debug add --enable-debug --disable-shared
 
 
-all: mcastpeer key-client key-server
+all: mcastpeer key-client key-server bulk-client
 
 mcastpeer: mcastpeer.o key-services.o key-socket.o
 	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
@@ -37,7 +37,10 @@ key-client: key-client.o key-services.o key-socket.o
 key-server: key-server.o key-services.o key-socket.o
 	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
+bulk-client: bulk-client.o key-services.o key-socket.o
+	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
+
 .PHONY: clean all
 
 clean:
-	rm -f *.o key-client key-server mcastpeer
+	rm -f *.o key-client key-server mcastpeer bulk-client
