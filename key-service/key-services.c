@@ -32,19 +32,19 @@
 /*----------------------------------------------------------------------------*/
 
 /* Generic responses for all supported packet types */
-static CmdPacket_t*   gRespPkt[CMD_PKT_TYPE_COUNT];
-static int            gRespPktLen[CMD_PKT_TYPE_COUNT];
-static volatile int   gKeyServerInitDone = 0;
-static int            gKeyServerRunning = 0;
-static int            gKeyServerStop = 0;
-       unsigned short gKeyServerEpoch;
-static struct in_addr gKeyServAddr;
-static struct in_addr gBcastAddr;
-static unsigned char  gPeerId = 0;
-static unsigned short gKeyServPort;
-static unsigned short gKeyBcastPort;
+static __thread CmdPacket_t*   gRespPkt[CMD_PKT_TYPE_COUNT];
+static __thread int            gRespPktLen[CMD_PKT_TYPE_COUNT];
+static __thread volatile int   gKeyServerInitDone = 0;
+static __thread int            gKeyServerRunning = 0;
+static __thread int            gKeyServerStop = 0;
+       __thread unsigned short gKeyServerEpoch;
+static __thread struct in_addr gKeyServAddr;
+static __thread struct in_addr gBcastAddr;
+static __thread unsigned char  gPeerId = 0;
+static __thread unsigned short gKeyServPort;
+static __thread unsigned short gKeyBcastPort;
 #ifndef NO_KEY_SERVER
-    static unsigned int   gAuthFailCount = 0;
+    static __thread unsigned int   gAuthFailCount = 0;
 #endif
 
 #ifdef WOLFSSL_STATIC_MEMORY
