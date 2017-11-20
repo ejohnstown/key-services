@@ -62,12 +62,15 @@ static void KeyBcastCallback(CmdPacket_t* pkt)
 static void* KeyClientWorker(void* arg)
 {
     tinfo_t* tInfo = (tinfo_t*)arg;
-    int i = 0, stop = 0, status;
+    int stop = 0, status;
     unsigned short keyEpoch, newKeyEpoch, switchEpoch, newSwitchEpoch;
     KeyRespPacket_t keyResp;
 
     keyEpoch = newKeyEpoch = switchEpoch = newSwitchEpoch = 0;
+
+#ifdef LOGGING
     printf("1: Thread %d starting\n", tInfo->idx);
+#endif
 
     KeyServices_Init(tInfo->idx, 22222, 11111);
 
@@ -89,19 +92,25 @@ static void* KeyClientWorker(void* arg)
 
         if (newKeyEpoch != keyEpoch) {
             /* Get the new key. If successful, update keyEpoch. */
+#ifdef LOGGING
             printf("10: Thread %d getting epoch %hu\n", tInfo->idx, newKeyEpoch);
+#endif
             status = KeyClient_GetKey_ex(&gInfo.srvAddr.sin_addr,
                                          &tInfo->addr.sin_addr,
                                          &keyResp, NULL);
             if (status == 0) {
                 unsigned short respEpoch = (keyResp.epoch[0] << 8 | keyResp.epoch[1]);
                 if (newKeyEpoch == respEpoch) {
+#ifdef LOGGING
                     printf("11: Thread %d got epoch %hu\n", tInfo->idx, newKeyEpoch);
+#endif
                     keyEpoch = newKeyEpoch;
                 }
             }
             else {
+#ifdef LOGGING
                 printf("13: Thread %d couldn't get key, will try again later.\n", tInfo->idx);
+#endif
             }
         }
 
@@ -109,15 +118,17 @@ static void* KeyClientWorker(void* arg)
             /* If the switch key is the same as our current keyEpoch,
              * switch over. */
             if (newSwitchEpoch == keyEpoch)  {
+#ifdef LOGGING
                 printf("12: Thread %d switching to epoch %hu\n", tInfo->idx, newSwitchEpoch);
+#endif
                 switchEpoch = newSwitchEpoch;
             }
         }
-
-        printf("2: Thread %d iteration %d\n", tInfo->idx, i++);
     }
 
+#ifdef LOGGING
     printf("3: Thread %d ending\n", tInfo->idx);
+#endif
 
     return NULL;
 }
@@ -196,8 +207,10 @@ int main(int argc, char* argv[])
         ti->addr.sin_port = 0;
 
         status = pthread_create(pid, NULL, KeyClientWorker, ti);
+#ifdef LOGGING
         if (status != 0)
             printf("0: thread %d failed (%d)\n", i, status);
+#endif
     }
 
     status = KeyBcast_RunUdp(&blInfo.addr.sin_addr, KeyBcastCallback, NULL);
