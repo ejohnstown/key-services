@@ -62,8 +62,7 @@ static void KeyBcastCallback(CmdPacket_t* pkt)
 static void* KeyClientWorker(void* arg)
 {
     tinfo_t* tInfo = (tinfo_t*)arg;
-    int i = 0, stop = 0;
-    int fd, status;
+    int i = 0, stop = 0, status;
     unsigned short keyEpoch, newKeyEpoch, switchEpoch, newSwitchEpoch;
     KeyRespPacket_t keyResp;
 
@@ -72,21 +71,6 @@ static void* KeyClientWorker(void* arg)
 
     KeyServices_Init(tInfo->idx, 22222, 11111);
 
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
-        printf("5: thread %d socket fail\n", tInfo->idx);
-        return NULL;
-    }
-
-    status = bind(fd, (struct sockaddr*)&tInfo->addr, sizeof(tInfo->addr));
-    if (status != 0) {
-        printf("6: thread %d bind fail\n", tInfo->idx);
-        return NULL;
-    }
-
-    printf("7: thread %d fd = %d\n", tInfo->idx, fd);
-
-    status = 0;
     while (!stop) {
         pthread_mutex_lock(&gInfo.mutex);
         while (!gInfo.stop &&
@@ -106,8 +90,9 @@ static void* KeyClientWorker(void* arg)
         if (newKeyEpoch != keyEpoch) {
             /* Get the new key. If successful, update keyEpoch. */
             printf("10: Thread %d getting epoch %hu\n", tInfo->idx, newKeyEpoch);
-            memset(&keyResp, 0x23, sizeof(keyResp));
-            status = KeyClient_GetKey(&gInfo.srvAddr.sin_addr, &keyResp, NULL);
+            status = KeyClient_GetKey_ex(&gInfo.srvAddr.sin_addr,
+                                         &tInfo->addr.sin_addr,
+                                         &keyResp, NULL);
             if (status == 0) {
                 unsigned short respEpoch = (keyResp.epoch[0] << 8 | keyResp.epoch[1]);
                 if (newKeyEpoch == respEpoch) {
@@ -132,7 +117,6 @@ static void* KeyClientWorker(void* arg)
         printf("2: Thread %d iteration %d\n", tInfo->idx, i++);
     }
 
-    close(fd);
     printf("3: Thread %d ending\n", tInfo->idx);
 
     return NULL;
@@ -195,9 +179,11 @@ int main(int argc, char* argv[])
     blInfo.addr.sin_family = AF_INET;
     blInfo.addr.sin_port = 0;
 
-    /* For this test, the ID (102) shouldn't be used by the key server
-     * or any of the other key clients. */
+    /* This is the init for the local key broadcast listener. It should
+     * be using a different peer ID than any of the key clients or the
+     * key server. */
     KeyServices_Init(102, 22222, 11111);
+
     /* Start the key client threads. */
     for (i = 0, pid = kcPids, ti = kcInfos;
          i < tCount;
