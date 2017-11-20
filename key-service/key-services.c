@@ -22,6 +22,9 @@
     #endif
     #define htons(x) (x)
     extern NX_IP *nxIp;
+    #define THREAD_LOCAL
+#else
+    #define THREAD_LOCAL __thread
 #endif
 
 #define KEY_SERVICE_RECV_TIMEOUT (1 * KEY_SERVICE_TICKS_PER_SECOND)
@@ -32,19 +35,19 @@
 /*----------------------------------------------------------------------------*/
 
 /* Generic responses for all supported packet types */
-static __thread CmdPacket_t*   gRespPkt[CMD_PKT_TYPE_COUNT];
-static __thread int            gRespPktLen[CMD_PKT_TYPE_COUNT];
-static __thread volatile int   gKeyServerInitDone = 0;
-static __thread int            gKeyServerRunning = 0;
-static __thread int            gKeyServerStop = 0;
-       __thread unsigned short gKeyServerEpoch;
-static __thread struct in_addr gKeyServAddr;
-static __thread struct in_addr gBcastAddr;
-static __thread unsigned char  gPeerId = 0;
-static __thread unsigned short gKeyServPort;
-static __thread unsigned short gKeyBcastPort;
+static THREAD_LOCAL CmdPacket_t*   gRespPkt[CMD_PKT_TYPE_COUNT];
+static THREAD_LOCAL int            gRespPktLen[CMD_PKT_TYPE_COUNT];
+static THREAD_LOCAL volatile int   gKeyServerInitDone = 0;
+static THREAD_LOCAL int            gKeyServerRunning = 0;
+static THREAD_LOCAL int            gKeyServerStop = 0;
+       THREAD_LOCAL unsigned short gKeyServerEpoch;
+static THREAD_LOCAL struct in_addr gKeyServAddr;
+static THREAD_LOCAL struct in_addr gBcastAddr;
+static THREAD_LOCAL unsigned char  gPeerId = 0;
+static THREAD_LOCAL unsigned short gKeyServPort;
+static THREAD_LOCAL unsigned short gKeyBcastPort;
 #ifndef NO_KEY_SERVER
-    static __thread unsigned int   gAuthFailCount = 0;
+    static THREAD_LOCAL unsigned int   gAuthFailCount = 0;
 #endif
 
 #ifdef WOLFSSL_STATIC_MEMORY
