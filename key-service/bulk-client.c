@@ -8,11 +8,16 @@
 
 
 typedef struct ginfo_t {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+
+    /* Get mutex. */
     int stop;
     unsigned short keyEpoch;
     unsigned short switchEpoch;
-    pthread_cond_t cond;
-    pthread_mutex_t mutex;
+
+    /* Read only. */
+    struct sockaddr_in srvAddr;
 } ginfo_t;
 
 typedef struct tinfo_t {
@@ -22,7 +27,7 @@ typedef struct tinfo_t {
 
 
 static ginfo_t gInfo =
-    {0, 0, 0, PTHREAD_COND_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
+    {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0};
 
 
 static void KeyBcastCallback(CmdPacket_t* pkt)
@@ -41,6 +46,7 @@ static void KeyBcastCallback(CmdPacket_t* pkt)
         pthread_mutex_unlock(&gInfo.mutex);
 
     }
+
     if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_USE) {
         printf("Key Change Server: Switch!\n");
 
@@ -56,12 +62,15 @@ static void KeyBcastCallback(CmdPacket_t* pkt)
 static void* KeyClientWorker(void* arg)
 {
     tinfo_t* tInfo = (tinfo_t*)arg;
-    int i = 0;
+    int i = 0, stop = 0;
     int fd, status;
-    unsigned short keyEpoch = 0;
-    unsigned short switchEpoch = 0;
+    unsigned short keyEpoch, newKeyEpoch, switchEpoch, newSwitchEpoch;
+    KeyRespPacket_t keyResp;
 
+    keyEpoch = newKeyEpoch = switchEpoch = newSwitchEpoch = 0;
     printf("1: Thread %d starting\n", tInfo->idx);
+
+    KeyServices_Init(tInfo->idx, 22222, 11111);
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -77,35 +86,51 @@ static void* KeyClientWorker(void* arg)
 
     printf("7: thread %d fd = %d\n", tInfo->idx, fd);
 
-    pthread_mutex_lock(&gInfo.mutex);
-    while (!gInfo.stop) {
-
+    status = 0;
+    while (!stop) {
+        pthread_mutex_lock(&gInfo.mutex);
         while (!gInfo.stop &&
                gInfo.keyEpoch == keyEpoch &&
                gInfo.switchEpoch == switchEpoch) {
 
             pthread_cond_wait(&gInfo.cond, &gInfo.mutex);
         }
+        stop = gInfo.stop;
+        newKeyEpoch = gInfo.keyEpoch;
+        newSwitchEpoch = gInfo.switchEpoch;
+        pthread_mutex_unlock(&gInfo.mutex);
 
-        if (gInfo.stop)
+        if (stop)
             break;
 
-        if (gInfo.keyEpoch != keyEpoch) {
+        if (newKeyEpoch != keyEpoch) {
             /* Get the new key. If successful, update keyEpoch. */
-            keyEpoch = gInfo.keyEpoch;
+            printf("10: Thread %d getting epoch %hu\n", tInfo->idx, newKeyEpoch);
+            memset(&keyResp, 0x23, sizeof(keyResp));
+            status = KeyClient_GetKey(&gInfo.srvAddr.sin_addr, &keyResp, NULL);
+            if (status == 0) {
+                unsigned short respEpoch = (keyResp.epoch[0] << 8 | keyResp.epoch[1]);
+                if (newKeyEpoch == respEpoch) {
+                    printf("11: Thread %d got epoch %hu\n", tInfo->idx, newKeyEpoch);
+                    keyEpoch = newKeyEpoch;
+                }
+            }
+            else {
+                printf("13: Thread %d couldn't get key, will try again later.\n", tInfo->idx);
+            }
         }
 
-        if (gInfo.switchEpoch != switchEpoch) {
+        if (newSwitchEpoch != switchEpoch) {
             /* If the switch key is the same as our current keyEpoch,
              * switch over. */
-            if (gInfo.switchEpoch == keyEpoch)
-                switchEpoch = gInfo.switchEpoch;
+            if (newSwitchEpoch == keyEpoch)  {
+                printf("12: Thread %d switching to epoch %hu\n", tInfo->idx, newSwitchEpoch);
+                switchEpoch = newSwitchEpoch;
+            }
         }
 
         printf("2: Thread %d iteration %d\n", tInfo->idx, i++);
     }
-
-    pthread_mutex_unlock(&gInfo.mutex);
 
     close(fd);
     printf("3: Thread %d ending\n", tInfo->idx);
@@ -165,17 +190,22 @@ int main(int argc, char* argv[])
 
     /* Start the broadcast listener thread. */
     blInfo.idx = -1;
-    /*strcpy(ipAddr, "192.168.20.1");*/
+    strcpy(ipAddr, "192.168.20.1");
     inet_pton(AF_INET, ipAddr, &blInfo.addr.sin_addr);
+    blInfo.addr.sin_family = AF_INET;
     blInfo.addr.sin_port = 0;
 
+    /* For this test, the ID (102) shouldn't be used by the key server
+     * or any of the other key clients. */
+    KeyServices_Init(102, 22222, 11111);
     /* Start the key client threads. */
     for (i = 0, pid = kcPids, ti = kcInfos;
          i < tCount;
          i++, pid++, ti++) {
 
         ti->idx = i;
-        /*sprintf(ipAddr, "192.168.20.%d", IP_ADDR_OFFSET + i);*/
+        sprintf(ipAddr, "192.168.20.%d", IP_ADDR_OFFSET + i);
+        ti->addr.sin_family = AF_INET;
         inet_pton(AF_INET, ipAddr, &ti->addr.sin_addr);
         ti->addr.sin_port = 0;
 
@@ -186,7 +216,7 @@ int main(int argc, char* argv[])
 
     status = KeyBcast_RunUdp(&blInfo.addr.sin_addr, KeyBcastCallback, NULL);
     if (status != 0) {
-        printf("KeyBcast failed\n");
+        printf("KeyBcast failed %d\n", status);
         goto exit;
     }
 
