@@ -749,8 +749,9 @@ static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* ms
     return ret;
 }
 
-static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
-    unsigned char* msg, int* msgLen, void* heap)
+static int KeyClient_GetNet(const struct in_addr* srvAddr,
+        const struct in_addr* cliAddr,
+        int reqType, unsigned char* msg, int* msgLen, void* heap)
 {
     int ret;
 #ifdef HAVE_NETX
@@ -804,6 +805,16 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr, int reqType,
     ret = KeySocket_CreateTcpSocket(&sockfd);
     if (ret != 0) {
         goto exit;
+    }
+
+    /* Bind the client address. Not done for NETX. */
+    if (cliAddr != NULL) {
+    #ifndef HAVE_NETX
+        ret = KeySocket_Bind(sockfd, cliAddr, 0, 0);
+        if (ret != 0) {
+            goto exit;
+        }
+    #endif
     }
 
     /* Connect to socket */
@@ -1070,7 +1081,7 @@ int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg
     else
 #endif
     {
-        ret = KeyClient_GetNet(srvAddr, reqType, msg, msgLen, heap);
+        ret = KeyClient_GetNet(srvAddr, NULL, reqType, msg, msgLen, heap);
     }
 
     return ret;
@@ -1100,6 +1111,13 @@ int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, vo
     return KeyClient_Get(srvAddr, CMD_PKT_TYPE_KEY_REQ, (unsigned char*)keyResp, &msgLen, heap);
 }
 
+int KeyClient_GetKey_ex(const struct in_addr* srvAddr, const struct in_addr* cliAddr,
+                        KeyRespPacket_t* keyResp, void* heap)
+{
+    int msgLen = sizeof(KeyRespPacket_t);
+    return KeyClient_GetNet(srvAddr, cliAddr, CMD_PKT_TYPE_KEY_REQ, (unsigned char*)keyResp, &msgLen, heap);
+}
+
 
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap)
 {
@@ -1110,7 +1128,7 @@ int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap)
 int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* epochResp, void* heap)
 {
     int msgLen = sizeof(EpochRespPacket_t);
-    return KeyClient_GetNet(srvAddr, CMD_PKT_TYPE_KEY_NEW, (unsigned char*)epochResp, &msgLen, heap);
+    return KeyClient_GetNet(srvAddr, NULL, CMD_PKT_TYPE_KEY_NEW, (unsigned char*)epochResp, &msgLen, heap);
 }
 
 void KeyServices_Init(unsigned char peerId,

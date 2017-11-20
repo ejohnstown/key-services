@@ -11,6 +11,7 @@ int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg
 int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
 
 int KeyClient_GetKey(const struct in_addr* srvAddr, KeyRespPacket_t* keyResp, void* heap);
+int KeyClient_GetKey_ex(const struct in_addr* srvAddr, const struct in_addr* cliAddr, KeyRespPacket_t* keyResp, void* heap);
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
 int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* epochResp, void* heap);
 
