@@ -58,7 +58,8 @@ static void* KeyClientWorker(void* arg)
     tinfo_t* tInfo = (tinfo_t*)arg;
     int i = 0;
     int fd, status;
-    unsigned short check = 0;
+    unsigned short keyEpoch = 0;
+    unsigned short switchEpoch = 0;
 
     printf("1: Thread %d starting\n", tInfo->idx);
 
@@ -80,8 +81,8 @@ static void* KeyClientWorker(void* arg)
     while (!gInfo.stop) {
 
         while (!gInfo.stop &&
-               gInfo.keyEpoch == check &&
-               gInfo.switchEpoch == check) {
+               gInfo.keyEpoch == keyEpoch &&
+               gInfo.switchEpoch == switchEpoch) {
 
             pthread_cond_wait(&gInfo.cond, &gInfo.mutex);
         }
@@ -89,7 +90,17 @@ static void* KeyClientWorker(void* arg)
         if (gInfo.stop)
             break;
 
-        check = gInfo.switchEpoch;
+        if (gInfo.keyEpoch != keyEpoch) {
+            /* Get the new key. If successful, update keyEpoch. */
+            keyEpoch = gInfo.keyEpoch;
+        }
+
+        if (gInfo.switchEpoch != switchEpoch) {
+            /* If the switch key is the same as our current keyEpoch,
+             * switch over. */
+            if (gInfo.switchEpoch == keyEpoch)
+                switchEpoch = gInfo.switchEpoch;
+        }
 
         printf("2: Thread %d iteration %d\n", tInfo->idx, i++);
     }
