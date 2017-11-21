@@ -16,6 +16,8 @@ typedef struct ginfo_t {
     int stop;
     unsigned short keyEpoch;
     unsigned short switchEpoch;
+    int mcastTrigger;
+    int mcastFd;
 
     /* Read only. */
     struct sockaddr_in srvAddr;
@@ -28,7 +30,26 @@ typedef struct tinfo_t {
 
 
 static ginfo_t gInfo =
-    {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0};
+    {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0, 0, 0};
+
+
+static void *TimerWorker(void* arg)
+{
+    useconds_t timeout = (unsigned int)arg * 1000;
+    int stop;
+
+    do {
+        /*printf("Sleeping for %ums.\n", (unsigned int)arg);*/
+        usleep(timeout);
+        pthread_mutex_lock(&gInfo.mutex);
+        gInfo.mcastTrigger++;
+        stop = gInfo.stop;
+        pthread_cond_broadcast(&gInfo.cond);
+        pthread_mutex_unlock(&gInfo.mutex);
+    } while (!stop);
+
+    return NULL;
+}
 
 
 static void KeyBcastCallback(CmdPacket_t* pkt)
@@ -65,11 +86,12 @@ static void KeyBcastCallback(CmdPacket_t* pkt)
 static void* KeyClientWorker(void* arg)
 {
     tinfo_t* tInfo = (tinfo_t*)arg;
-    int stop = 0, status;
+    int stop = 0, mcastTrigger, newMcastTrigger, status;
     unsigned short keyEpoch, newKeyEpoch, switchEpoch, newSwitchEpoch;
     KeyRespPacket_t keyResp;
 
     keyEpoch = newKeyEpoch = switchEpoch = newSwitchEpoch = 0;
+    mcastTrigger = newMcastTrigger = 0;
 
 #ifdef LOGGING
     printf("1: Thread %d starting\n", tInfo->idx);
@@ -81,13 +103,15 @@ static void* KeyClientWorker(void* arg)
         pthread_mutex_lock(&gInfo.mutex);
         while (!gInfo.stop &&
                gInfo.keyEpoch == keyEpoch &&
-               gInfo.switchEpoch == switchEpoch) {
+               gInfo.switchEpoch == switchEpoch &&
+               gInfo.mcastTrigger == mcastTrigger) {
 
             pthread_cond_wait(&gInfo.cond, &gInfo.mutex);
         }
         stop = gInfo.stop;
         newKeyEpoch = gInfo.keyEpoch;
         newSwitchEpoch = gInfo.switchEpoch;
+        newMcastTrigger = gInfo.mcastTrigger;
         pthread_mutex_unlock(&gInfo.mutex);
 
         if (stop)
@@ -127,6 +151,20 @@ static void* KeyClientWorker(void* arg)
                 switchEpoch = newSwitchEpoch;
             }
         }
+
+        if (newMcastTrigger != mcastTrigger) {
+            unsigned char buffer[6] = {0, 4, 8, 16, 23, 42};
+            int sent;
+
+            mcastTrigger = newMcastTrigger;
+            /*printf("Thread %d, wakey wakey! (%d)\n", tInfo->idx, mcastTrigger);*/
+
+            buffer[0] = tInfo->idx;
+            sent = (int)sendto(gInfo.mcastFd, buffer, sizeof(buffer), 0,
+                    (struct sockaddr*)&gInfo.srvAddr, sizeof(gInfo.srvAddr));
+            if (sent != sizeof(buffer))
+                printf("couldn't send data\n");
+        }
     }
 
 #ifdef LOGGING
@@ -144,7 +182,9 @@ int main(int argc, char* argv[])
     tinfo_t *kcInfos; /* Key Client thread infos */
     tinfo_t *ti;
     pthread_t *pid;
+    pthread_t timerPid;
     int status, i, tCount, ret;
+    int on = 1;
     char ipAddr[16] = "127.0.0.1";
 
     kcPids = NULL;
@@ -186,12 +226,44 @@ int main(int argc, char* argv[])
         goto exit;
     }
 
-    /* Start the broadcast listener thread. */
+    /* Set up the broadcast listener address. */
     blInfo.idx = -1;
-    sprintf(ipAddr, "%s.1", gNetworkBase);
+    sprintf(ipAddr, "%s.2", gNetworkBase);
     inet_pton(AF_INET, ipAddr, &blInfo.addr.sin_addr);
     blInfo.addr.sin_family = AF_INET;
     blInfo.addr.sin_port = 0;
+
+    /* Make the mcast socket. */
+    gInfo.mcastFd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (gInfo.mcastFd < 0) {
+        printf("5: mcastFd socket fail\n");
+        goto exit;
+    }
+
+    status = setsockopt(gInfo.mcastFd,
+                        SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    if (status < 0)
+        goto exit;
+#ifdef SO_REUSEPORT
+    status = setsockopt(gInfo.mcastFd,
+                        SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
+    if (status < 0)
+        goto exit;
+#endif
+
+    status = bind(gInfo.mcastFd,
+                  (struct sockaddr*)&blInfo.addr, sizeof(blInfo.addr));
+    if (status != 0) {
+        int err = errno;
+        printf("6: mcastFd socket bind fail: %s\n", strerror(err));
+        goto exit;
+    }
+
+    memset(&gInfo.srvAddr, 0, sizeof(gInfo.srvAddr));
+    sprintf(ipAddr, "%s.1", gNetworkBase);
+    inet_pton(AF_INET, ipAddr, &gInfo.srvAddr.sin_addr);
+    gInfo.srvAddr.sin_family = AF_INET;
+    gInfo.srvAddr.sin_port = htons(12345);
 
     /* This is the init for the local key broadcast listener. It should
      * be using a different peer ID than any of the key clients or the
@@ -216,6 +288,12 @@ int main(int argc, char* argv[])
 #endif
     }
 
+    status = pthread_create(&timerPid, NULL, TimerWorker, (void*)750);
+#ifdef LOGGING
+    if (status != 0)
+        printf("0: thread TIMER failed (%d)\n", status);
+#endif
+
     status = KeyBcast_RunUdp(&blInfo.addr.sin_addr, KeyBcastCallback, NULL);
     if (status != 0) {
         printf("KeyBcast failed %d\n", status);
@@ -233,12 +311,14 @@ int main(int argc, char* argv[])
 
         pthread_join(*pid, NULL);
     }
+    pthread_join(timerPid, NULL);
 
     ret = 0;
 
 exit:
     pthread_cond_destroy(&gInfo.cond);
     pthread_mutex_destroy(&gInfo.mutex);
+    close(gInfo.mcastFd);
     free(kcInfos);
     free(kcPids);
 
