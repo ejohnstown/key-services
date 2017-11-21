@@ -5,6 +5,7 @@
 
 #define MAX_THREAD_COUNT 100
 #define IP_ADDR_OFFSET 21
+const char gNetworkBase[] = "192.168.20";
 
 
 typedef struct ginfo_t {
@@ -187,7 +188,7 @@ int main(int argc, char* argv[])
 
     /* Start the broadcast listener thread. */
     blInfo.idx = -1;
-    strcpy(ipAddr, "192.168.20.1");
+    sprintf(ipAddr, "%s.1", gNetworkBase);
     inet_pton(AF_INET, ipAddr, &blInfo.addr.sin_addr);
     blInfo.addr.sin_family = AF_INET;
     blInfo.addr.sin_port = 0;
@@ -203,7 +204,7 @@ int main(int argc, char* argv[])
          i++, pid++, ti++) {
 
         ti->idx = i;
-        sprintf(ipAddr, "192.168.20.%d", IP_ADDR_OFFSET + i);
+        sprintf(ipAddr, "%s.%d", gNetworkBase, IP_ADDR_OFFSET + i);
         ti->addr.sin_family = AF_INET;
         inet_pton(AF_INET, ipAddr, &ti->addr.sin_addr);
         ti->addr.sin_port = 0;
