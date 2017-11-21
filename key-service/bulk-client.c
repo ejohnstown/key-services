@@ -42,6 +42,8 @@ static void KeyBcastCallback(CmdPacket_t* pkt)
         pthread_mutex_lock(&gInfo.mutex);
         gInfo.keyEpoch = pkt->msg.keyChgResp.epoch[0] << 8 |
                          pkt->msg.keyChgResp.epoch[1];
+        memcpy(&gInfo.srvAddr.sin_addr.s_addr, addr,
+               sizeof(gInfo.srvAddr.sin_addr.s_addr));
         pthread_cond_broadcast(&gInfo.cond);
         pthread_mutex_unlock(&gInfo.mutex);
 
