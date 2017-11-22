@@ -376,7 +376,7 @@ void KeyServerReqPktCallback(CmdPacket_t* pkt)
 static void* KeyServerThread(void* arg)
 {
     void* heap = arg;
-    KeyServer_Run(KeyServerReqPktCallback, heap);
+    KeyServer_Run(KeyServerReqPktCallback, 0, heap);
     return NULL;
 }
 

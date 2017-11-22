@@ -116,7 +116,7 @@ static TX_THREAD gWolfCastClientThread[3];
 static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
 static char gWolfCastClientStack[3][KS_STACK_SZ];
-static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
+LINK_SECTION(data_sdram) static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
 
 #ifndef NO_KEY_SERVER
     static TX_THREAD gKeyServerThread;
@@ -259,7 +259,7 @@ KeyServerEntry(ULONG ignore)
     }
 
     if (result == 0) {
-        result = KeyServer_Run(keyServerCb, gHeapHint);
+        result = KeyServer_Run(keyServerCb, 99, gHeapHint);
         if (result != 0) {
             WOLFLOCAL_LOG(2, "KeyServer terminated. (%d)\n", result);
         }
@@ -660,7 +660,8 @@ void WolfLocalTimer(void)
 #ifndef NO_KEY_SERVER
     WOLFLOCAL_LOG(3, "timer: %u\n", count);
     /* Every X seconds on the 0, ... */
-    if ((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0) {
+    if (((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0  && !gSwitchKeyCount && !gUseKeyCount) || gRekeyNow) {
+    	gRekeyNow = 0;
         WOLFLOCAL_LOG(3, "timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
         if (KeyServer_IsRunning()) {
             if (!gRekeyPending) {

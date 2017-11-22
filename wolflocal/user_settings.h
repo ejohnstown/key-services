@@ -48,20 +48,21 @@
 #define KEY_SERVICE_LOGGING_LEVEL 3
 #define WOLFCAST_LOGGING_LEVEL 3
 #define WOLFLOCAL_LOGGING_LEVEL 3
-#if 0
-#define DEBUG_WOLFSSL
+#if 1
+//#define DEBUG_WOLFSSL
 #define WOLFSSL_DEBUG_MEMORY
 /* Enabling WOLFSSL_DEBUG_MEMORY requires modifying the file memory.c. It
  * calls printf() directly, and if you don't have it you'll get an error. */
 #endif
 
 #define WOLFSSL_MAX_MTU 512
-#define WOLFMEM_BUCKETS 64,128,256,384,512,1024,4680
-#define WOLFMEM_DIST 14,4,6,8,2,2,4
-#define WOLFMEM_MAX_BUCKETS 7
+#define WOLFMEM_BUCKETS 64,128,256,384,512,1024,4680,29696
+#define WOLFMEM_DIST 14,4,6,8,4,2,4,1
+#define WOLFMEM_MAX_BUCKETS 8
 /* The static memory size is based on the above constants, and calculated
  * by the function wolfSSL_StaticBufferSz(). */
-#define WOLFLOCAL_STATIC_MEMORY_SZ 30000
+//#define WOLFLOCAL_STATIC_MEMORY_SZ 30000
+#define WOLFLOCAL_STATIC_MEMORY_SZ 3000000
 
 #define KEY_SOCKET_RECVFROM_TIMEOUT 300
 

@@ -138,7 +138,7 @@ int main(int argc, char **argv)
     pthread_detach(tid);
 
     KeyServer_Resume();
-    ret = KeyServer_Run(KeyServerReqPktCallback, params.heap);
+    ret = KeyServer_Run(KeyServerReqPktCallback, 0, params.heap);
 
 exit:
 

@@ -7,7 +7,7 @@
 /* API's */
 int KeyServer_Init(void* heap, const struct in_addr* srvAddr);
 typedef void (*KeyServerReqPktCb)(CmdPacket_t* pkt);
-int KeyServer_Run(KeyServerReqPktCb reqCb, void* heap);
+int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap);
 int KeyServer_IsRunning(void);
 void KeyServer_Pause(void);
 void KeyServer_Resume(void);
