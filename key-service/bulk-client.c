@@ -44,6 +44,7 @@ static void FilteredLog(int level, const char* fmt, ...)
 #define MAX_THREAD_COUNT 100
 #define IP_ADDR_OFFSET 21
 const char gNetworkBase[] = "192.168.20";
+const char gMcastAddr[] = "226.0.0.3";
 
 
 typedef struct ginfo_t {
@@ -57,6 +58,7 @@ typedef struct ginfo_t {
     int mcastTrigger;
 
     /* Read only. */
+    struct sockaddr_in mcastAddr;
     struct sockaddr_in srvAddr;
 } ginfo_t;
 
@@ -129,12 +131,29 @@ static void* KeyClientWorker(void* arg)
     KeyRespPacket_t keyResp;
     char message[128];
     int on = 1, mcastFd;
+    WOLFSSL_CTX* ctx;
+    WOLFSSL* ssl;
 
     XLOG(2, "1: Thread %d starting\n", tInfo->idx);
 
     keyEpoch = newKeyEpoch = switchEpoch = newSwitchEpoch = 0;
     mcastTrigger = newMcastTrigger = 0;
     memset(message, 0, sizeof(message));
+
+    ctx = wolfSSL_CTX_new(wolfDTLSv1_2_client_method());
+    if (ctx == NULL) {
+        XLOG(1, "Thread %d unable to create wolfSSL CTX\n", tInfo->idx);
+        return NULL;
+    }
+
+    status = wolfSSL_CTX_mcast_set_member_id(ctx, (unsigned short)tInfo->idx);
+    if (status != SSL_SUCCESS) {
+        XLOG(1, "Thread %d unable to set session ID\n", tInfo->idx);
+        wolfSSL_CTX_free(ctx);
+        return NULL;
+    }
+    ssl = NULL;
+
 
     /* Make the mcast socket. */
     mcastFd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -210,22 +229,40 @@ static void* KeyClientWorker(void* arg)
                 XLOG(3, "12: Thread %d switching to epoch %hu\n",
                      tInfo->idx, newSwitchEpoch);
                 switchEpoch = newSwitchEpoch;
+                if (ssl == NULL) {
+                    ssl = wolfSSL_new(ctx);
+                    if (ssl == NULL) {
+                        XLOG(1, "Thread %d unable to create DTLS session\n",
+                             tInfo->idx);
+                        return NULL;
+                    }
+                    wolfSSL_set_write_fd(ssl, mcastFd);
+                }
+                status = wolfSSL_set_secret(ssl,
+                     (keyResp.epoch[0] << 8) | keyResp.epoch[1],
+                     keyResp.pms, sizeof(keyResp.pms),
+                     keyResp.clientRandom[0], keyResp.serverRandom[0],
+                     keyResp.suite);
+                if (status != SSL_SUCCESS) {
+                    XLOG(1, "Thread %d unable to set session key\n",
+                         tInfo->idx);
+                }
             }
         }
 
         if (newMcastTrigger != mcastTrigger) {
-            int sent;
-
             mcastTrigger = newMcastTrigger;
-            sprintf(message, "Peer %02d sending message #%lu",
-                    tInfo->idx, iteration);
-            sent = (int)sendto(mcastFd, message, sizeof(message), 0,
-                    (struct sockaddr*)&gInfo.srvAddr, sizeof(gInfo.srvAddr));
-            if (sent != sizeof(message)) {
-                XLOG(1, "couldn't send data\n");
+            if (ssl != NULL) {
+                int sent;
+                sprintf(message, "Peer %02d sending message #%lu",
+                        tInfo->idx, iteration);
+                sent = (int)sendto(mcastFd, message, sizeof(message), 0,
+                        (struct sockaddr*)&gInfo.srvAddr, sizeof(gInfo.srvAddr));
+                if (sent != sizeof(message)) {
+                    XLOG(1, "couldn't send data\n");
+                }
+                iteration++;
             }
-
-            iteration++;
         }
     }
 
@@ -271,6 +308,7 @@ int main(int argc, char* argv[])
     }
 
     memset(&gInfo.srvAddr, 0, sizeof(gInfo.srvAddr));
+    memset(&gInfo.mcastAddr, 0, sizeof(gInfo.mcastAddr));
     memset(&blInfo, 0, sizeof(blInfo));
     memset(kcPids, 0, sizeof(pthread_t)*tCount);
     memset(kcInfos, 0, sizeof(tinfo_t)*tCount);
@@ -293,6 +331,9 @@ int main(int argc, char* argv[])
     inet_pton(AF_INET, ipAddr, &blInfo.addr.sin_addr);
     blInfo.addr.sin_family = AF_INET;
     blInfo.addr.sin_port = 0;
+
+    inet_pton(AF_INET, gMcastAddr, &gInfo.mcastAddr.sin_addr);
+    gInfo.mcastAddr.sin_family = AF_INET;
 
     /* Set up the key server address. */
     sprintf(ipAddr, "%s.2", gNetworkBase);
