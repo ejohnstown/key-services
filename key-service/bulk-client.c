@@ -229,6 +229,10 @@ static void* KeyClientWorker(void* arg)
                 XLOG(3, "12: Thread %d switching to epoch %hu\n",
                      tInfo->idx, newSwitchEpoch);
                 switchEpoch = newSwitchEpoch;
+                if (ssl != NULL) {
+                    wolfSSL_free(ssl);
+                    ssl = NULL;
+                }
                 if (ssl == NULL) {
                     ssl = wolfSSL_new(ctx);
                     if (ssl == NULL) {
@@ -237,15 +241,17 @@ static void* KeyClientWorker(void* arg)
                         return NULL;
                     }
                     wolfSSL_set_write_fd(ssl, mcastFd);
-                }
-                status = wolfSSL_set_secret(ssl,
-                     (keyResp.epoch[0] << 8) | keyResp.epoch[1],
-                     keyResp.pms, sizeof(keyResp.pms),
-                     keyResp.clientRandom[0], keyResp.serverRandom[0],
-                     keyResp.suite);
-                if (status != SSL_SUCCESS) {
-                    XLOG(1, "Thread %d unable to set session key\n",
-                         tInfo->idx);
+                    wolfSSL_dtls_set_peer(ssl,
+                        (struct sockaddr*)&gInfo.srvAddr, sizeof(gInfo.srvAddr));
+                    status = wolfSSL_set_secret(ssl,
+                         (keyResp.epoch[0] << 8) | keyResp.epoch[1],
+                         keyResp.pms, sizeof(keyResp.pms),
+                         keyResp.clientRandom[0], keyResp.serverRandom[0],
+                         keyResp.suite);
+                    if (status != SSL_SUCCESS) {
+                        XLOG(1, "Thread %d unable to set session key\n",
+                             tInfo->idx);
+                    }
                 }
             }
         }
@@ -256,8 +262,7 @@ static void* KeyClientWorker(void* arg)
                 int sent;
                 sprintf(message, "Peer %02d sending message #%lu",
                         tInfo->idx, iteration);
-                sent = (int)sendto(mcastFd, message, sizeof(message), 0,
-                        (struct sockaddr*)&gInfo.srvAddr, sizeof(gInfo.srvAddr));
+                sent = wolfSSL_write(ssl, message, sizeof(message));
                 if (sent != sizeof(message)) {
                     XLOG(1, "couldn't send data\n");
                 }

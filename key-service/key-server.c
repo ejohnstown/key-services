@@ -8,9 +8,9 @@
 
 
 typedef struct params_t {
-	struct in_addr myAddr;
-	struct in_addr bcastAddr;
-	void* heap;
+    struct in_addr myAddr;
+    struct in_addr bcastAddr;
+    void* heap;
 } params_t;
 
 
@@ -24,12 +24,12 @@ static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
 
 static void* KeyBcastThread(void* arg)
 {
-	params_t* params = (params_t*)arg;
+    params_t* params = (params_t*)arg;
     int ret;
 
     ret = KeyBcast_RunUdp(&params->bcastAddr,
-		                  KeyBcastReqPktCallback,
-						  params->heap);
+                          KeyBcastReqPktCallback,
+                          params->heap);
 
     return (void*)((size_t)ret);
 }
@@ -37,9 +37,11 @@ static void* KeyBcastThread(void* arg)
 
 static void* RekeyThread(void* arg)
 {
-	void* heap = ((params_t*)arg)->heap;
+    void* heap = ((params_t*)arg)->heap;
     int ret;
 
+    KeyServices_Init(101, KEY_BCAST_PORT, KEY_SERV_PORT);
+    ret = KeyServer_Init(heap, &((params_t*)arg)->myAddr);
     while (1) {
         sleep(30);
         printf("Generating and announcing new key.\n");
@@ -83,7 +85,7 @@ int main(int argc, char **argv)
 {
     int ret = 0;
     pthread_t tid;
-	params_t params;
+    params_t params;
 
 #if defined(DEBUG_WOLFSSL)
     wolfSSL_Debugging_ON();
@@ -106,7 +108,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-	params.heap = NULL;
+    params.heap = NULL;
 
     ret = wolfSSL_Init();
     if (ret != SSL_SUCCESS) {
@@ -114,7 +116,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    KeyServices_Init(0, KEY_BCAST_PORT, KEY_SERV_PORT);
+    KeyServices_Init(102, KEY_BCAST_PORT, KEY_SERV_PORT);
     ret = KeyServer_Init(params.heap, &params.myAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
@@ -122,6 +124,7 @@ int main(int argc, char **argv)
         return ret;
     }
 
+#if 0
     /* spin up another thread for UDP broadcast */
     ret = pthread_create(&tid, NULL, KeyBcastThread, &params);
     if (ret < 0) {
@@ -129,7 +132,7 @@ int main(int argc, char **argv)
         goto exit;
     }
     pthread_detach(tid);
-
+#endif
     ret = pthread_create(&tid, NULL, RekeyThread, &params);
     if (ret < 0) {
         printf("Pthread create failed for Rekey\n");
