@@ -66,5 +66,4 @@
 
 #define KEY_SOCKET_RECVFROM_TIMEOUT 300
 
-int mySeed(unsigned char* output, unsigned int sz);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)
