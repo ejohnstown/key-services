@@ -1,10 +1,7 @@
 #include "types.h"
 #include "wolflocal.h"
-#include "key-services.h"
 #include "key-client.h"
-#ifndef NO_KEY_SERVER
-    #include "key-server.h"
-#endif
+#include "key-server.h"
 #include "wolfcast.h"
 #include <wolfssl/error-ssl.h>
 
@@ -66,8 +63,8 @@ static void FilteredLog(int level, const char* fmt, ...)
 
 #define KS_MEMORY_POOL_SZ 4096
 #define KS_STACK_SZ 4096
-#define KS_PRIORITY 15
-#define KS_THRESHOLD 15
+#define KS_PRIORITY 21
+#define KS_THRESHOLD 21
 
 #define KS_TIMEOUT_1SEC 100
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
@@ -79,13 +76,6 @@ static void FilteredLog(int level, const char* fmt, ...)
 
 #define SERVER_ID 5
 #define FOREIGN_CLIENT_ID 23
-#ifdef PGB000
-    #define CLIENT_ID 6
-    #define OTHER_CLIENT_ID 7
-#else /* PGB006 */
-    #define CLIENT_ID 7
-    #define OTHER_CLIENT_ID 6
-#endif
 
 #ifndef WOLFLOCAL_KEY_SWITCH_TIME
     #define WOLFLOCAL_KEY_SWITCH_TIME 15
@@ -100,36 +90,30 @@ static void FilteredLog(int level, const char* fmt, ...)
     #define WOLFLOCAL_STATS_PERIOD 60
 #endif
 
-#ifdef PGB000
-    #include "pgb000_com.h"
-#else /* PGB000:PGB002 */
-    #include "pgb002_ap2.h"
-#endif
-
 /* Note: Return codes for wolfSSL code are of type int and typically
  * named "result". Return codes for ThreadX/NetX are of type UINT
  * and typically named "status". */
 
 static TX_THREAD gKeyBcastUdpThread;
 static TX_THREAD gKeyClientThread;
-static TX_THREAD gWolfCastClientThread[3];
+//static TX_THREAD gWolfCastClientThread[3];
+static TX_THREAD gKeyServerThread;
+
 static char gKeyBcastUdpStack[KS_STACK_SZ];
 static char gKeyClientStack[KS_STACK_SZ];
-static char gWolfCastClientStack[3][KS_STACK_SZ];
-LINK_SECTION(data_sdram) static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
-
-#ifndef NO_KEY_SERVER
-    static TX_THREAD gKeyServerThread;
-    static char gKeyServerStack[KS_STACK_SZ];
-#endif
+//static char gWolfCastClientStack[3][KS_STACK_SZ];
+static char gKeyServerStack[KS_STACK_SZ];
+LINK_SECTION(bss_sdram) static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_SZ];
 
 #ifdef WOLFSSL_STATIC_MEMORY
-    #if defined(NETX) && defined(PGB002)
-        #define MEMORY_SECTION LINK_SECTION(data_sdram)
+    #if defined(NETX) && defined(__RX__)
+        #define MEMORY_SECTION LINK_SECTION(bss_sdram)
     #else
         #define MEMORY_SECTION
     #endif
-    MEMORY_SECTION unsigned char gWolfCastMemory[3][WOLFLOCAL_STATIC_MEMORY_SZ];
+    MEMORY_SECTION unsigned char gWolfCastMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
+    LINK_SECTION(data_sdram) UCHAR *heap_address = gWolfCastMemory;
+    LINK_SECTION(data_sdram) UINT	heap_size = WOLFLOCAL_STATIC_MEMORY_SZ;
 #endif
 
 
@@ -140,45 +124,50 @@ LINK_SECTION(data_sdram) static unsigned char gKeyServiceMemory[KS_MEMORY_POOL_S
  * Client to request a new key. */
 static TX_MUTEX gKeyStateMutex;
 static TX_EVENT_FLAGS_GROUP gEventFlags;
-static UINT gKeySet[3] = { 0, 0, 0 };
-UINT gGetNewKey = 1;
-UINT gRequestRekey = 0;
-static UINT gFindMaster = 1;
-UINT gSwitchKeys[3] = { 1, 1, 1 };
-static KeyRespPacket_t gKeyState;
-static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
-static struct in_addr gKeySrvAddr = { 0 };
-wolfWrapper_t gWrappers[3];
-ULONG gAddr = 0;
-ULONG gMask = 0;
-
-#ifndef NO_KEY_SERVER
-    static UINT gRekeyPending = 0;
-    static UINT gSwitchKeyCount = 0;
-    static UINT gUseKeyCount = 0;
-#endif
-
-/* Port number for the KeyBcast server all endpoints run. */
-static unsigned short gBcastPort = 22222;
-/* Port number for the KeyServer all endpoints run. */
-static unsigned short gServPort = 11111;
+LINK_SECTION(bss_sdram)  UINT gKeySet = 0;
+LINK_SECTION(data_sdram) UINT gGetNewKey = 1;
+LINK_SECTION(bss_sdram)  UINT gRekeyNow = 0;
+LINK_SECTION(bss_sdram) UINT gRequestRekey = 0;
+LINK_SECTION(data_sdram) static UINT gFindMaster = 1;
+LINK_SECTION(data_sdram) UINT gSwitchKeys = 1;
+LINK_SECTION(bss_sdram) KeyRespPacket_t gKeyState;
+LINK_SECTION(bss_sdram) static WOLFSSL_HEAP_HINT *gHeapHint = NULL;
+LINK_SECTION(bss_sdram) struct in_addr gKeySrvAddr = { 0 };
+LINK_SECTION(bss_sdram) UINT gRekeyPending = 0;
+LINK_SECTION(bss_sdram) static UINT gSwitchKeyCount = 0;
+LINK_SECTION(bss_sdram) static UINT gUseKeyCount = 0;
+LINK_SECTION(bss_sdram) wolfWrapper_t *gWrapper;
+LINK_SECTION(bss_sdram) ULONG gAddr = 0;
+LINK_SECTION(bss_sdram) ULONG gMask = 0;
 
 /* Group address for the wolfCast multicast group. */
-static struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
+static const struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
+
 /* Port number for the wolfCast multicast group. */
-static unsigned short gGroupPort = 12345;
+static const unsigned short gGroupPort = 12345;
+
+/* Port number for the KeyBcast server all endpoints run. */
+static const unsigned short gBcastPort = 22222;
+
+/* Port number for the KeyServer all endpoints run. */
+static const unsigned short gServPort = 11111;
 
 
-const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID, OTHER_CLIENT_ID };
-#define PEER_ID_LIST_SZ (sizeof(gPeerIdList)/sizeof(gPeerIdList[0]))
+//const USHORT gPeerIdList[] = { SERVER_ID, FOREIGN_CLIENT_ID };
+//#define PEER_ID_LIST_SZ (sizeof(gPeerIdList)/sizeof(gPeerIdList[0]))
 
 
 extern NX_IP* nxIp;
 extern unsigned short gKeyServerEpoch;
+extern unsigned char gPeerId;
 
 #define KS_EVENT_HEAP (1 << 0)
 #define KS_EVENT_ADDR (1 << 1)
 
+void WolfLocalRekey(void)
+{
+	gRekeyNow = 1;
+}
 
 static int isAddrSet(void)
 {
@@ -201,8 +190,6 @@ static int isAddrSet(void)
 }
 
 
-#ifndef NO_KEY_SERVER
-
 static void
 keyServerCb(CmdPacket_t* pkt)
 {
@@ -210,9 +197,7 @@ keyServerCb(CmdPacket_t* pkt)
         (pkt->header.type == CMD_PKT_TYPE_KEY_NEW ||
          (pkt->header.type == CMD_PKT_TYPE_KEY_REQ &&
           !gRekeyPending &&
-          (wolfSSL_mcast_peer_known(gWrappers[0].curSsl, pkt->header.id) ||
-           wolfSSL_mcast_peer_known(gWrappers[1].curSsl, pkt->header.id) ||
-           wolfSSL_mcast_peer_known(gWrappers[2].curSsl, pkt->header.id))))) {
+          wolfSSL_mcast_peer_known(gWrapper->curSsl, pkt->header.id)))) {
 
         gRekeyPending = 1;
         gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
@@ -234,8 +219,7 @@ KeyServerEntry(ULONG ignore)
 
     {
         ULONG flags;
-        result = tx_event_flags_get(&gEventFlags,
-                                    (KS_EVENT_HEAP | KS_EVENT_ADDR),
+        result = tx_event_flags_get(&gEventFlags, KS_EVENT_HEAP,
                                     TX_AND, &flags, TX_WAIT_FOREVER);
         if (result == TX_SUCCESS)
             WOLFLOCAL_LOG(3, "KeyServerEntry got the start event (%u)\n",
@@ -248,18 +232,25 @@ KeyServerEntry(ULONG ignore)
         WOLFLOCAL_LOG(1, "KeyServer couldn't initialize wolfSSL.\n");
     }
 
-    if (result != 0) {
-        WOLFLOCAL_LOG(1, "KeyServer couldn't initialize. (%d)\n", result);
+    while (!isAddrSet()) {
+        WOLFLOCAL_LOG(3, "Key server waiting for network.\n");
+        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
     }
 
     {
         struct in_addr inaddr;
         inaddr.s_addr = gAddr;
-        result = KeyServer_Init(gHeapHint, &inaddr);
+        result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
     }
 
+    if (result != 0) {
+        WOLFLOCAL_LOG(1, "KeyServer couldn't initialize. (%d)\n", result);
+    }
+
+    tx_event_flags_set(&gEventFlags, KS_EVENT_ADDR, TX_OR);
+
     if (result == 0) {
-        result = KeyServer_Run(keyServerCb, 99, gHeapHint);
+        result = KeyServer_Run(keyServerCb, gHeapHint);
         if (result != 0) {
             WOLFLOCAL_LOG(2, "KeyServer terminated. (%d)\n", result);
         }
@@ -269,8 +260,6 @@ KeyServerEntry(ULONG ignore)
     wolfSSL_Cleanup();
 }
 
-#endif /* !NO_KEY_SERVER */
-
 
 static void
 broadcastCb(CmdPacket_t* pkt)
@@ -278,19 +267,17 @@ broadcastCb(CmdPacket_t* pkt)
     unsigned char* msg;
     unsigned short epoch;
 
-#ifndef NO_KEY_SERVER
     if (KeyServer_IsRunning()) {
-        WOLFLOCAL_LOG(3, "I am the key server, I should ignore my broadcasts.\n");
+    	gKeySrvAddr.s_addr = gAddr;
+    	WOLFLOCAL_LOG(3, "I am the key server, I should ignore my broadcasts.\n");
         return;
     }
-#endif
 
     if (pkt != NULL) {
         switch (pkt->header.type) {
             case CMD_PKT_TYPE_KEY_CHG:
                 /* trigger key change */
                 msg = pkt->msg.keyChgResp.ipaddr;
-                XMEMCPY(&gKeySrvAddr.s_addr, msg, sizeof(gKeySrvAddr.s_addr));
                 gGetNewKey = 1;
                 break;
             case CMD_PKT_TYPE_KEY_USE:
@@ -298,9 +285,7 @@ broadcastCb(CmdPacket_t* pkt)
                 msg = pkt->msg.epochResp.epoch;
                 epoch = (msg[0] << 8) | msg[1];
                 if (epoch != gKeyServerEpoch) {
-                    gSwitchKeys[0] = epoch;
-                    gSwitchKeys[1] = epoch;
-                    gSwitchKeys[2] = epoch;
+                    gSwitchKeys = epoch;
                 }
                 break;
         }
@@ -322,19 +307,12 @@ KeyBcastUdpEntry(ULONG ignore)
 
     (void)ignore;
 
-    result = tx_event_flags_get(&gEventFlags, KS_EVENT_HEAP,
+    result = tx_event_flags_get(&gEventFlags, (KS_EVENT_HEAP | KS_EVENT_ADDR),
                                 TX_AND, &flags, TX_WAIT_FOREVER);
     if (result == TX_SUCCESS)
         WOLFLOCAL_LOG(3, "KeyBcastUdpEntry got the start event (%u)\n", flags);
     else
         WOLFLOCAL_LOG(1, "KeyBcastUdpEntry failed to get event flags\n");
-
-    while (!isAddrSet()) {
-        WOLFLOCAL_LOG(3, "Key server waiting for network.\n");
-        tx_thread_sleep(KS_TIMEOUT_NETWORK_READY);
-    }
-
-    tx_event_flags_set(&gEventFlags, KS_EVENT_ADDR, TX_OR);
 
     result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
     if (result != 0) {
@@ -386,6 +364,7 @@ KeyClientEntry(ULONG ignore)
         }
 
         if (findMaster) {
+        	gKeySrvAddr.s_addr = gAddr;
             result = KeyClient_FindMaster(&gKeySrvAddr, gHeapHint);
             if (result != 0) {
                 WOLFLOCAL_LOG(3, "Key server didn't announce itself.\n");
@@ -424,12 +403,8 @@ KeyClientEntry(ULONG ignore)
             if (status == TX_SUCCESS) {
                 WOLFLOCAL_LOG(3, "Key client got key\n");
                 memcpy(&gKeyState, &keyResp, sizeof(KeyRespPacket_t));
-#ifndef NO_KEY_SERVER
                 KeyServer_SetKeyResp(&gKeyState, gHeapHint);
-#endif
-                gKeySet[0] = 1;
-                gKeySet[1] = 1;
-                gKeySet[2] = 1;
+                gKeySet = 1;
                 storeKey = 0;
                 tx_mutex_put(&gKeyStateMutex);
             }
@@ -449,77 +424,46 @@ KeyClientEntry(ULONG ignore)
  * the test_1hz() thread. The old globals used by the code are
  * now local variables. It will wait for the flag for the key
  * getting set to go true before starting to broadcast. */
-static void
-WolfCastClientEntry(ULONG arg)
-{
-    wolfWrapper_t* wrapper;
-    unsigned int txTime;
-    unsigned int txCount;
-    int error;
-    USHORT peerId, streamId;
-
-    peerId = arg & 0xFFFF;
-    streamId = (arg >> 16) & 0xFFFF;
-    wrapper = &gWrappers[streamId];
-
-    {
-        ULONG flags = 0;
-        error = tx_event_flags_get(&gEventFlags, KS_EVENT_ADDR,
-                                   TX_AND, &flags, TX_WAIT_FOREVER);
-        if (error == TX_SUCCESS)
-            WOLFLOCAL_LOG(3, "WolfCastClientEntry got the start event (%u)\n",
-                          flags);
-        else
-            WOLFLOCAL_LOG(1, "WolfCastClientEntry failed to get event flags\n");
-    }
-
-    error = wolfWrapper_Init(wrapper, streamId, peerId,
-                             gGroupPort + streamId, gGroupAddr.s_addr,
-                             gPeerIdList, PEER_ID_LIST_SZ,
-                             gWolfCastMemory[streamId],
-                             sizeof(gWolfCastMemory[streamId]));
-    if (error) {
-        WOLFLOCAL_LOG(1,
-                      "wolfCast client wrapper %u create failed = 0x%02X\n",
-                      streamId, error);
-        return;
-    }
-
-    if (!error) {
-        UINT keySet = gKeySet[streamId];
-
-        /* Wait for the first key. */
-        do {
-            WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
-            tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
-
-            error = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
-            if (error == TX_SUCCESS) {
-                WOLFLOCAL_LOG(3, "wolfCast getting key set flag\n");
-                keySet = gKeySet[streamId];
-                error = tx_mutex_put(&gKeyStateMutex);
-            }
-            else {
-                WOLFLOCAL_LOG(3, "Couldn't get key mutex. Trying again.\n");
-            }
-        } while (!keySet);
-
-        gSwitchKeys[streamId] = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
-    }
-
-    if (!error)
-        error = WolfcastClientInit(&txTime, &txCount);
-
-    while (!error) {
-        error = wolfWrapper_Update(wrapper);
-        if (!error)
-            error = WolfcastClient(wrapper, &txTime, &txCount);
-        if (!error)
-            tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
-    }
-
-    WOLFLOCAL_LOG(3, "wolfCast thread %u ended.\n", streamId);
-}
+//static void
+//WolfCastClientEntry(ULONG streamId)
+//{
+//    wolfWrapper_t* wrapper;
+//    unsigned int txTime;
+//    unsigned int txCount;
+//    int error;
+//
+//    {
+//        ULONG flags = 0;
+//        error = tx_event_flags_get(&gEventFlags, KS_EVENT_ADDR,
+//                                   TX_AND, &flags, TX_WAIT_FOREVER);
+//        if (error == TX_SUCCESS)
+//            WOLFLOCAL_LOG(3, "WolfCastClientEntry got the start event (%u)\n",
+//                          flags);
+//        else
+//            WOLFLOCAL_LOG(1, "WolfCastClientEntry failed to get event flags\n");
+//    }
+//
+//    wrapper = &gWrappers[streamId];
+//
+//    error = wolfWrapper_Init(wrapper, streamId, gPeerId,
+//                             gGroupPort + streamId, gGroupAddr.s_addr,
+//                             gPeerIdList, PEER_ID_LIST_SZ,
+//                             gWolfCastMemory[streamId],
+//                             sizeof(gWolfCastMemory[streamId]));
+//
+//    if (!error)
+//        error = WolfcastClientInit(&txTime, &txCount);
+//
+//    while (!error) {
+//        error = wolfWrapper_Update(wrapper);
+//        if (!error)
+//            error = WolfcastClient(wrapper, &txTime, &txCount);
+//        if (!error)
+//            tx_thread_sleep(KS_TIMEOUT_WOLFCAST);
+//    }
+//
+//    WOLFLOCAL_LOG(3, "wolfCast thread %u ended.\n", streamId);
+//}
 
 
 #ifdef DEBUG_WOLFSSL
@@ -539,7 +483,7 @@ static void WolfLocalLog(const int logLevel, const char *const logMessage)
  * group key access. Creates threads for the Key Server, Key Client,
  * and the wolfCast demo application. */
 void
-WolfLocalInit(UCHAR id)
+WolfLocalInit(wolfWrapper_t *wrapper, UCHAR id)
 {
     UINT status;
     int i;
@@ -548,7 +492,8 @@ WolfLocalInit(UCHAR id)
     if (status != TX_SUCCESS)
         WOLFLOCAL_LOG(1, "couldn't create event flags");
 
-    KeyServices_Init(id, gBcastPort, gServPort);
+    gWrapper = wrapper;
+    gPeerId = id;
 
 #ifdef DEBUG_WOLFSSL
     wolfSSL_SetLoggingCb(WolfLocalLog);
@@ -590,7 +535,6 @@ WolfLocalInit(UCHAR id)
         return;
     }
 
-#ifndef NO_KEY_SERVER
     status = tx_thread_create(&gKeyServerThread, "key service server",
                            KeyServerEntry, 0,
                            gKeyServerStack, sizeof(gKeyServerStack),
@@ -600,7 +544,6 @@ WolfLocalInit(UCHAR id)
         WOLFLOCAL_LOG(1, "key server thread create failed = 0x%02X\n", status);
         return;
     }
-#endif
 
     status = tx_thread_create(&gKeyClientThread, "key service client",
                            KeyClientEntry, 0,
@@ -612,21 +555,21 @@ WolfLocalInit(UCHAR id)
         return;
     }
 
-    for (i = 0; i < 3; i++) {
-        ULONG arg = (id & 0xFFFF) | (i << 16);
-        status = tx_thread_create(&gWolfCastClientThread[i], "wolfCast client",
-                               WolfCastClientEntry, arg,
-                               gWolfCastClientStack[i],
-                               sizeof(gWolfCastClientStack[i]),
-                               KS_PRIORITY, KS_THRESHOLD,
-                               TX_NO_TIME_SLICE, TX_AUTO_START);
-        if (status != TX_SUCCESS) {
-            WOLFLOCAL_LOG(1,
-                          "wolfCast client thread %u create failed = 0x%02X\n",
-                          i, status);
-            return;
-        }
-    }
+//    for (i = 0; i < 3; i++)
+//    {
+//        status = tx_thread_create(&gWolfCastClientThread[i], "wolfCast client",
+//                               WolfCastClientEntry, i,
+//                               gWolfCastClientStack[i],
+//                               sizeof(gWolfCastClientStack[i]),
+//                               KS_PRIORITY, KS_THRESHOLD,
+//                               TX_NO_TIME_SLICE, TX_AUTO_START);
+//        if (status != TX_SUCCESS) {
+//            WOLFLOCAL_LOG(1,
+//                          "wolfCast client thread %u create failed = 0x%02X\n",
+//                          i, status);
+//            return;
+//        }
+//    }
 
     return;
 }
@@ -636,6 +579,7 @@ void WolfLocalTimer(void)
 {
     static unsigned int count = 0;
     UINT status;
+    int ret;
 
     if (count == 0) {
         ULONG flags = 0;
@@ -657,21 +601,27 @@ void WolfLocalTimer(void)
 
     count++;
 
-#ifndef NO_KEY_SERVER
+    if (!KeyServer_IsRunning())
+    {
+    	gRekeyPending = 0;
+    }
+
     WOLFLOCAL_LOG(3, "timer: %u\n", count);
     /* Every X seconds on the 0, ... */
     if (((count % WOLFLOCAL_KEY_CHANGE_PERIOD) == 0  && !gSwitchKeyCount && !gUseKeyCount) || gRekeyNow) {
-    	gRekeyNow = 0;
         WOLFLOCAL_LOG(3, "timer: %u on the 0\n", WOLFLOCAL_KEY_CHANGE_PERIOD);
         if (KeyServer_IsRunning()) {
+        	gKeySrvAddr.s_addr = gAddr;
             if (!gRekeyPending) {
-                if (KeyServer_GenNewKey(gHeapHint)) {
+                ret = KeyServer_GenNewKey(gHeapHint);
+                if (ret) {
                     WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
                 }
                 else {
                     status = tx_mutex_get(&gKeyStateMutex,
                                           KS_TIMEOUT_KEY_STATE_WRITE);
                     if (status == TX_SUCCESS) {
+                    	gRekeyNow = 0;
                         gGetNewKey = 1;
                         gRekeyPending = 1;
                         gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
@@ -690,9 +640,7 @@ void WolfLocalTimer(void)
 #endif /* WOLFLOCAL_TEST_KEY_REQUEST */
         }
     }
-#endif /* !NO_KEY_SERVER */
 
-#ifndef NO_KEY_SERVER
     if (gSwitchKeyCount && gUseKeyCount)
         gUseKeyCount = 0;
 
@@ -707,22 +655,22 @@ void WolfLocalTimer(void)
         else {
             WOLFLOCAL_LOG(3, "timer: 15 seconds later\n");
             if (KeyServer_IsRunning()) {
+            	gKeySrvAddr.s_addr = gAddr;
                 gUseKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
-                if (KeyServer_NewKeyUse(gHeapHint)) {
+                ret = KeyServer_NewKeyUse(gHeapHint);
+                if (ret) {
                     WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
                 }
                 else {
                     status = tx_mutex_get(&gKeyStateMutex,
                                           KS_TIMEOUT_KEY_STATE_WRITE);
                     if (status == TX_SUCCESS) {
-                        gSwitchKeys[0] = gKeyServerEpoch;
-                        gSwitchKeys[1] = gKeyServerEpoch;
-                        gSwitchKeys[2] = gKeyServerEpoch;
+                        gSwitchKeys = gKeyServerEpoch;
                         /* Should be an epoch number */
-                        gRekeyPending = 0;
                         tx_mutex_put(&gKeyStateMutex);
                     }
                 }
+                gRekeyPending = 0;
             }
         }
     }
@@ -730,31 +678,31 @@ void WolfLocalTimer(void)
     if (gUseKeyCount) {
         gUseKeyCount--;
         if (gUseKeyCount != 0) {
-            if (KeyServer_NewKeyUse(gHeapHint)) {
+            ret = KeyServer_NewKeyUse(gHeapHint);
+            if (ret) {
                 WOLFLOCAL_LOG(1, "Failed to announce key switch.\n");
             }
         }
     }
-#endif /* !NO_KEY_SERVER */
 
     if ((count % WOLFLOCAL_STATS_PERIOD) == 0) {
-        unsigned int mac, replay, epoch, i;
+        unsigned int ks, mac, replay, epoch, i;
 
-#ifndef NO_KEY_SERVER
-        {
-            unsigned int ks;
-            ks = KeyServer_GetAuthFailCount();
-            WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
-        }
-#endif
+        ks = KeyServer_GetAuthFailCount();
+        WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
 
-        for (i = 0; i < 3; i++) {
-            wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
-            WOLFLOCAL_LOG(3, "Wrapper[%u] macFail: %u\n"
-                      "            replayCount: %u\n"
-                      "            epochDrop: %u\n",
-                      i, mac, replay, epoch);
-        }
+		wolfWrapper_GetErrorStats(gWrapper, &mac, &replay, &epoch);
+		WOLFLOCAL_LOG(3, "Wrapper macFail: %u\n"
+				  	     "    replayCount: %u\n"
+				  	  	 "      epochDrop: %u\n",
+				  	  	 mac, replay, epoch);
+//        for (i = 0; i < 3; i++) {
+//            wolfWrapper_GetErrorStats(&gWrappers[i], &mac, &replay, &epoch);
+//            WOLFLOCAL_LOG(3, "Wrapper[%u] macFail: %u\n"
+//                      "            replayCount: %u\n"
+//                      "            epochDrop: %u\n",
+//                      i, mac, replay, epoch);
+//        }
     }
 
 #if 0
@@ -764,7 +712,8 @@ void WolfLocalTimer(void)
         if (!KeyServer_IsRunning()) {
             struct in_addr scratch;
             WOLFLOCAL_LOG(3, "finding the master\n");
-            if (KeyClient_FindMaster(&scratch, gHeapHint)) {
+            ret = KeyClient_FindMaster(&scratch, gHeapHint);
+            if (ret != 0) {
                 WOLFLOCAL_LOG(2,
                               "Key server didn't announce itself, "
                               "becoming master.\n");
@@ -773,6 +722,12 @@ void WolfLocalTimer(void)
         }
     }
 #endif
+}
+
+
+struct in_addr WolfLocalGetKeySrvAddr(void)
+{
+	return gKeySrvAddr;
 }
 
 
@@ -895,12 +850,13 @@ exit:
 
 
 
-int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
+int wolfWrapper_Init(wolfWrapper_t* wrapper,
                      UCHAR myId, USHORT groupPort, ULONG groupAddr,
                      const USHORT *peerIdList, UINT peerIdListSz,
                      void* heap, UINT heapSz)
 {
-    int ret = 0;
+    int ret;
+    int keySet = 0;
 
     if (wrapper == NULL || heap == NULL || heapSz == 0 ||
         peerIdList == NULL || peerIdListSz == 0 ||
@@ -911,26 +867,19 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
 
     memset(wrapper, 0, sizeof(wolfWrapper_t));
 
-    wrapper->streamId = streamId;
     wrapper->myId = myId;
     wrapper->groupAddr = groupAddr;
     wrapper->groupPort = groupPort;
     wrapper->peerIdList = peerIdList;
     wrapper->peerIdListSz = peerIdListSz;
-#ifdef PGB000
-    wrapper->ip = &bsp_ip_system_bus;
-    wrapper->pool = &bsp_pool_system_bus;
-#else /* PGB000:PGB002 */
-    wrapper->ip = &bsp_ip_local_bus;
-    wrapper->pool = &bsp_pool_local_bus;
-#endif /* PGB002 */
+    wrapper->ip = BSP_IP_POINTER;
+    wrapper->pool = BSP_POOL_POINTER;
 
     ret = wolfSSL_CTX_load_static_memory(&wrapper->ctx,
                                          wolfDTLSv1_2_client_method_ex,
                                          heap, heapSz, 0, 2);
     if (ret != SSL_SUCCESS) {
         WOLFLOCAL_LOG(1, "unable to load static memory and create ctx\n");
-        ret = -1;
         goto exit;
     }
 
@@ -939,7 +888,6 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
     ret = wolfSSL_CTX_mcast_set_member_id(wrapper->ctx, myId);
     if (ret != SSL_SUCCESS) {
         WOLFLOCAL_LOG(1, "set mcast member id error\n");
-        ret = -1;
         goto exit;
     }
 
@@ -961,20 +909,20 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
         goto exit;
     }
 
-    ret = nx_udp_socket_create(wrapper->ip, &wrapper->realTxSocket,
-                               "Multicast TX Socket",
-                               NX_IP_NORMAL, NX_DONT_FRAGMENT,
-                               NX_IP_TIME_TO_LIVE, 30);
-    if (ret != NX_SUCCESS) {
-        WOLFLOCAL_LOG(1, "unable to create tx socket\n");
-        goto exit;
-    }
-
-    ret = nx_udp_socket_bind(&wrapper->realTxSocket, NX_ANY_PORT, NX_NO_WAIT);
-    if (ret != NX_SUCCESS) {
-        WOLFLOCAL_LOG(1, "tx bind failed\n");
-        goto exit;
-    }
+//    ret = nx_udp_socket_create(wrapper->ip, &wrapper->realTxSocket,
+//                               "Multicast TX Socket",
+//                               NX_IP_NORMAL, NX_DONT_FRAGMENT,
+//                               NX_IP_TIME_TO_LIVE, 30);
+//    if (ret != NX_SUCCESS) {
+//        WOLFLOCAL_LOG(1, "unable to create tx socket\n");
+//        goto exit;
+//    }
+//
+//    ret = nx_udp_socket_bind(&wrapper->realTxSocket, NX_ANY_PORT, NX_NO_WAIT);
+//    if (ret != NX_SUCCESS) {
+//        WOLFLOCAL_LOG(1, "tx bind failed\n");
+//        goto exit;
+//    }
 
     ret = nx_igmp_loopback_disable(wrapper->ip);
 
@@ -983,27 +931,44 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper, UINT streamId,
         goto exit;
     }
 
-    ret = nx_udp_socket_create(wrapper->ip, &wrapper->realRxSocket,
-                               "Multicast RX Socket",
-                               NX_IP_NORMAL, NX_DONT_FRAGMENT,
-                               NX_IP_TIME_TO_LIVE, 30);
-    if (ret != NX_SUCCESS) {
-        WOLFLOCAL_LOG(1, "unable to create rx socket\n");
-        goto exit;
-    }
+//    ret = nx_udp_socket_create(wrapper->ip, &wrapper->realRxSocket,
+//                               "Multicast RX Socket",
+//                               NX_IP_NORMAL, NX_DONT_FRAGMENT,
+//                               NX_IP_TIME_TO_LIVE, 30);
+//    if (ret != NX_SUCCESS) {
+//        WOLFLOCAL_LOG(1, "unable to create rx socket\n");
+//        goto exit;
+//    }
+//
+//    ret = nx_udp_socket_bind(&wrapper->realRxSocket,
+//                             wrapper->groupPort, NX_NO_WAIT);
+//    if (ret != NX_SUCCESS) {
+//        WOLFLOCAL_LOG(1, "rx bind failed\n");
+//        goto exit;
+//    }
+//
+//    ret = nx_igmp_multicast_join(wrapper->ip, wrapper->groupAddr);
+//    if (ret != NX_SUCCESS) {
+//        WOLFLOCAL_LOG(1, "setsockopt mc add membership failed\n");
+//        goto exit;
+//    }
 
-    ret = nx_udp_socket_bind(&wrapper->realRxSocket,
-                             wrapper->groupPort, NX_NO_WAIT);
-    if (ret != NX_SUCCESS) {
-        WOLFLOCAL_LOG(1, "rx bind failed\n");
-        goto exit;
-    }
+    /* Wait for the first key. */
+    while (!keySet) {
+        WOLFLOCAL_LOG(3, "wolfCast thread waiting for first key.\n");
+        tx_thread_sleep(KS_TIMEOUT_WOLFLOCAL_KEY_POLL);
 
-    ret = nx_igmp_multicast_join(wrapper->ip, wrapper->groupAddr);
-    if (ret != NX_SUCCESS) {
-        WOLFLOCAL_LOG(1, "setsockopt mc add membership failed\n");
-        goto exit;
+        ret = tx_mutex_get(&gKeyStateMutex, TX_WAIT_FOREVER);
+        if (ret == TX_SUCCESS) {
+            WOLFLOCAL_LOG(3, "wolfCast getting key set flag\n");
+            keySet = gKeySet;
+            ret = tx_mutex_put(&gKeyStateMutex);
+        }
+        else {
+            WOLFLOCAL_LOG(3, "Couldn't get key mutex. Trying again.\n");
+        }
     }
+    gSwitchKeys = (gKeyState.epoch[0] << 8) | gKeyState.epoch[1];
 
 exit:
     return ret;
@@ -1038,7 +1003,7 @@ static int wolfWrapper_NewSession(wolfWrapper_t* wrapper, WOLFSSL** ssl)
             goto exit;
         }
     }
-
+    
     *ssl = newSsl;
     newSsl = NULL;
 
@@ -1065,10 +1030,10 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
         if (status != TX_SUCCESS)
             goto exit;
 
-        wrapper->keySet = gKeySet[wrapper->streamId];
-        gKeySet[wrapper->streamId] = 0;
-        wrapper->switchKeys = gSwitchKeys[wrapper->streamId];
-        gSwitchKeys[wrapper->streamId] = 0;
+        wrapper->keySet = gKeySet;
+        gKeySet = 0;
+        wrapper->switchKeys = gSwitchKeys;
+        gSwitchKeys = 0;
 
         if (wrapper->keySet) {
             memcpy(&wrapper->keyState, &gKeyState, sizeof(gKeyState));
@@ -1105,8 +1070,8 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
             status = wolfSSL_set_secret(newSsl, wrapper->newEpoch,
                             wrapper->keyState.pms,
                             sizeof(wrapper->keyState.pms),
-                            wrapper->keyState.clientRandom[wrapper->streamId],
-                            wrapper->keyState.serverRandom[wrapper->streamId],
+                            wrapper->keyState.clientRandom,
+                            wrapper->keyState.serverRandom,
                             wrapper->keyState.suite);
             if (status != SSL_SUCCESS) {
                 error = 1;
@@ -1127,6 +1092,7 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
                 wolfSSL_free(wrapper->prevSsl);
             }
             wrapper->prevSsl = wrapper->curSsl;
+            wrapper->prevEpoch = wrapper->epoch;
             wrapper->curSsl = newSsl;
             wrapper->epoch = wrapper->newEpoch;
             newSsl = NULL;
@@ -1195,84 +1161,124 @@ exit:
 }
 
 
+void wolfWrapper_Read_Packet(wolfWrapper_t* wrapper, NX_PACKET *nxPacket, USHORT* peerId,
+                   void* buf, int sz, int* recvSz)
+{
+    UINT nx_status;
+    int status = 0;
+    unsigned short epoch;
+
+    if (wrapper != NULL && buf != NULL && sz != 0)
+    {
+        wrapper->rxPacket = nxPacket;
+		epoch = GetEpoch(nxPacket);
+		if (epoch == wrapper->epoch && wrapper->curSsl != NULL)
+		{
+			status = wolfSSL_mcast_read(wrapper->curSsl, peerId, buf, sz);
+			if (status < 0)
+			{
+				status = wolfSSL_get_error(wrapper->curSsl, status);
+				if (status == VERIFY_MAC_ERROR || status == DECRYPT_ERROR)
+				{
+					if (epoch == wrapper->prevEpoch && wrapper->prevSsl != NULL)
+					{
+						status = wolfSSL_mcast_read(wrapper->prevSsl, peerId, buf, sz);
+						if (status < 0)
+						{
+							status = wolfSSL_get_error(wrapper->prevSsl, status);
+							if (status == VERIFY_MAC_ERROR || status == DECRYPT_ERROR)
+							{
+								WOLFLOCAL_LOG(3, "Allowable DTLS error. Ignoring a message.\n");
+							}
+							else if (status != SSL_ERROR_WANT_READ)
+							{
+								WOLFLOCAL_LOG(1, "wolfSSL error: %s\n",
+										  wolfSSL_ERR_reason_error_string(status));
+							}
+						    status = 0;
+						}
+					}
+					else
+					{
+						WOLFLOCAL_LOG(3, "Allowable DTLS error. Ignoring a message.\n");
+					}
+				}
+				else if (status != SSL_ERROR_WANT_READ)
+				{
+					WOLFLOCAL_LOG(1, "wolfSSL error: %s\n",
+							  wolfSSL_ERR_reason_error_string(status));
+				}
+			    status = 0;
+			}
+		}
+		else if (epoch == wrapper->prevEpoch && wrapper->prevSsl != NULL)
+		{
+			status = wolfSSL_mcast_read(wrapper->prevSsl, peerId, buf, sz);
+			if (status < 0)
+			{
+				status = wolfSSL_get_error(wrapper->prevSsl, status);
+				if (status == VERIFY_MAC_ERROR || status == DECRYPT_ERROR)
+				{
+					WOLFLOCAL_LOG(3, "Allowable DTLS error. Ignoring a message.\n");
+				}
+				else if (status != SSL_ERROR_WANT_READ)
+				{
+					WOLFLOCAL_LOG(1, "wolfSSL error: %s\n",
+							  wolfSSL_ERR_reason_error_string(status));
+				}
+			    status = 0;
+			}
+		}
+    }
+	if (status > 0)
+	{
+		*recvSz = status;
+	}
+	else
+	{
+		if (epoch == wrapper->newEpoch)
+		{
+			/* We may have missed a new key update or a switch keys. */
+			gSwitchKeys = epoch;
+		}
+		if (KeyServer_IsRunning())
+		{
+			gKeySrvAddr.s_addr = gAddr;
+//			if (epoch > wrapper->epoch)
+//			{
+//				gKeyServerEpoch = epoch;
+//			}
+		}
+		WOLFLOCAL_LOG(3, "Ignoring message unknown Epoch %hu Have %hu & %hu\n", epoch, wrapper->prevEpoch, wrapper->epoch);
+		wrapper->epochDropCount++;
+	}
+    if (wrapper != NULL && wrapper->rxPacket != NULL)
+    {
+        nx_status = nx_packet_release(wrapper->rxPacket);
+        if (nx_status != NX_SUCCESS)
+        {
+            WOLFLOCAL_LOG(1, "couldn't release packet\n");
+        }
+        wrapper->rxPacket = NULL;
+    }
+}
+
 int wolfWrapper_Read(wolfWrapper_t* wrapper, USHORT* peerId,
                    void* buf, int sz)
 {
     UINT status;
     NX_PACKET *nxPacket = NULL;
-    WOLFSSL *ssl = NULL;
-    unsigned short epoch;
     int recvSz = 0;
 
     if (wrapper == NULL || buf == NULL || sz == 0)
-        goto exit;
+        return recvSz;
 
     status = nx_udp_socket_receive(&wrapper->realRxSocket,
                                    &nxPacket, NX_NO_WAIT);
     if (status != NX_SUCCESS)
-        goto exit;
+        return recvSz;
 
-    wrapper->rxPacket = nxPacket;
-    epoch = GetEpoch(nxPacket);
-    if (epoch == wrapper->epoch)
-        ssl = wrapper->curSsl;
-    else if (epoch < wrapper->epoch)
-        ssl = wrapper->prevSsl;
-    else if (epoch > wrapper->epoch) {
-        /* We may have missed a new key update or a switch keys. */
-        gSwitchKeys[0] = epoch;
-        gSwitchKeys[1] = epoch;
-        gSwitchKeys[2] = epoch;
-#ifndef NO_KEY_SERVER
-        if (KeyServer_IsRunning()) {
-            gKeyServerEpoch = epoch;
-            if (!gRekeyPending) {
-                status = KeyServer_GenNewKey(gHeapHint);
-                if (status) {
-                    WOLFLOCAL_LOG(1, "Failed to announce new key.\n");
-                }
-                else {
-                    status = tx_mutex_get(&gKeyStateMutex,
-                                          KS_TIMEOUT_KEY_STATE_WRITE);
-                    if (status == TX_SUCCESS) {
-                        gGetNewKey = 1;
-                        gRekeyPending = 1;
-                        gSwitchKeyCount = WOLFLOCAL_KEY_SWITCH_TIME;
-                        tx_mutex_put(&gKeyStateMutex);
-                    }
-                }
-            }
-        }
-#endif /* !NO_KEY_SERVER */
-    }
-
-    if (ssl == NULL) {
-        WOLFLOCAL_LOG(3, "Ignoring message unknown Epoch.\n");
-        wrapper->epochDropCount++;
-        goto exit;
-    }
-
-    recvSz = wolfSSL_mcast_read(ssl, peerId, buf, sz);
-    if (recvSz < 0) {
-        recvSz = wolfSSL_get_error(ssl, recvSz);
-        if (recvSz == VERIFY_MAC_ERROR || recvSz == DECRYPT_ERROR) {
-            WOLFLOCAL_LOG(3, "Allowable DTLS error. Ignoring a message.\n");
-        }
-        else if (recvSz != SSL_ERROR_WANT_READ) {
-            WOLFLOCAL_LOG(1, "wolfSSL error: %s\n",
-                      wolfSSL_ERR_reason_error_string(recvSz));
-            goto exit;
-        }
-    }
-
-exit:
-    if (wrapper->rxPacket != NULL) {
-        status = nx_packet_release(wrapper->rxPacket);
-        if (status != NX_SUCCESS) {
-            WOLFLOCAL_LOG(1, "couldn't release packet\n");
-        }
-        wrapper->rxPacket = NULL;
-    }
+    wolfWrapper_Read_Packet(wrapper, nxPacket, peerId, buf, sz, &recvSz);
 
     return recvSz;
 }
@@ -1290,7 +1296,7 @@ int wolfWrapper_GetErrorStats(wolfWrapper_t* wrapper,
     if (wrapper != NULL) {
         ret = wolfSSL_dtls_get_drop_stats(wrapper->curSsl,
                                           &macCount, &replayCount);
-        if (ret == SSL_SUCCESS)
+        if (ret == SSL_SUCCESS && wrapper->prevSsl != NULL)
             ret = wolfSSL_dtls_get_drop_stats(wrapper->prevSsl,
                                               &prevMacCount, &prevReplayCount);
         if (ret != SSL_SUCCESS) {

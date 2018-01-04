@@ -66,7 +66,6 @@ static THREAD_LOCAL int            gKeyServerRunning = 0;
 static THREAD_LOCAL int            gKeyServerStop = 0;
        THREAD_LOCAL unsigned short gKeyServerEpoch;
 static THREAD_LOCAL struct in_addr gKeyServAddr;
-static THREAD_LOCAL struct in_addr gBcastAddr;
 static THREAD_LOCAL unsigned char  gPeerId = 0;
 static THREAD_LOCAL unsigned short gKeyServPort;
 static THREAD_LOCAL unsigned short gKeyBcastPort;
@@ -1664,7 +1663,7 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
     }
 
     /* copy address to global for key change */
-    XMEMCPY(&gBcastAddr, srvAddr, sizeof(struct in_addr));
+    XMEMCPY(&gKeyServAddr, srvAddr, sizeof(struct in_addr));
 
     /* create socket */
     ret = KeySocket_CreateUdpSocket(&listenfd);

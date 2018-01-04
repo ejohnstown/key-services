@@ -11,6 +11,7 @@ unsigned int LowResTimer(void);
 
 void WolfLocalInit(UCHAR id);
 void WolfLocalTimer(void);
+struct in_addr WolfLocalGetKeySrvAddr(void);
 
 
 typedef struct wolfWrapper_t {
