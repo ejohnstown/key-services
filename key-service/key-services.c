@@ -37,7 +37,7 @@
     __attribute__((__section__(".bss_sdram"))) static int *tcp_activity_timeout;
     __attribute__((__section__(".bss_sdram"))) static TX_EVENT_FLAGS_GROUP tcp_event_flags;
     __attribute__((__section__(".bss_sdram"))) static WOLFSSL **ssl;
-#define TCP_ACTIVITY_TIMEOUT     60        /* Seconds allowed with no activity                  */
+#define TCP_TIMEOUT_ACTIVITY     60        /* Seconds allowed with no activity                  */
 #define TCP_TIMEOUT_PERIOD         60           /* Number of seconds to check                        */
 #define TCP_TIMEOUT            (10 * NX_IP_PERIODIC_RATE)
 #define TCP_CONNECT            0x01        /* TCP connection is present                         */
@@ -66,7 +66,7 @@ static THREAD_LOCAL int            gKeyServerRunning = 0;
 static THREAD_LOCAL int            gKeyServerStop = 0;
        THREAD_LOCAL unsigned short gKeyServerEpoch;
 static THREAD_LOCAL struct in_addr gKeyServAddr;
-static THREAD_LOCAL unsigned char  gPeerId = 0;
+       THREAD_LOCAL unsigned char  gPeerId = 0;
 static THREAD_LOCAL unsigned short gKeyServPort;
 static THREAD_LOCAL unsigned short gKeyBcastPort;
 #ifndef NO_KEY_SERVER
@@ -111,10 +111,10 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 /*
  * Identify which psk key to use.
  */
-static unsigned int KeyServer_PskCb(WOLFSSL* ssl, const char* identity,
+static unsigned int KeyServer_PskCb(WOLFSSL* ignore, const char* identity,
     unsigned char* key, unsigned int key_max_len)
 {
-    (void)ssl;
+    (void)ignore;
 
     if (XSTRNCMP(identity, CLIENT_IDENTITY, XSTRLEN(CLIENT_IDENTITY)) != 0) {
         return 0;
@@ -434,26 +434,31 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
 
 static void tcp_data_present(NX_TCP_SOCKET *socket_ptr)
 {
+    (void)socket_ptr;
     /* Set the data event flag.  */
     tx_event_flags_set(&tcp_event_flags, TCP_DATA, TX_OR);
 }
 
 static void tcp_connection_present(NX_TCP_SOCKET *socket_ptr, UINT port)
 {
+    (void)socket_ptr;
+    (void)port;
     /* Set the connect event flag.  */
     tx_event_flags_set(&tcp_event_flags, TCP_CONNECT, TX_OR);
 }
 
 static void tcp_disconnect_present(NX_TCP_SOCKET *socket_ptr)
 {
+    (void)socket_ptr;
     tx_event_flags_set(&tcp_event_flags, TCP_DISCONNECT, TX_OR);
 }
 
 static void tcp_connect_process(int clients, WOLFSSL_CTX *ctx)
 {
 
-UINT                        i;
+int                         i;
 UINT                        status;
+int                         ret;
 KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
 
     /* Now look for a socket that is closed to relisten on.  */
@@ -501,32 +506,32 @@ KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
             tcp_connection_requests++;
 
             /* Attempt to accept on this socket.  */
-            status = KeySocket_Accept(&tcpSock[i], &connfd, 100);
-            if (status > 0)
+            ret = KeySocket_Accept(&tcpSock[i], &connfd, 100);
+            if (ret > 0)
             {
                 /* create WOLFSSL object and respond */
                 if ((ssl[i] = wolfSSL_new(ctx)) == NULL) {
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
                     printf("Error: wolfSSL_new\n");
                 #endif
-                    status = MEMORY_E;
+                    ret = MEMORY_E;
                 }
                 else
                 {
                     /* set connection context */
                     wolfSSL_SetIO_NetX(ssl[i], connfd, KEY_SERVICE_RECV_TIMEOUT);
 
-                    status = wolfSSL_accept(ssl[i]);
-                    if (status != SSL_SUCCESS)
+                    ret = wolfSSL_accept(ssl[i]);
+                    if (ret != SSL_SUCCESS)
                     {
-                        status = wolfSSL_get_error(ssl[i], status);
+                        ret = wolfSSL_get_error(ssl[i], status);
                         #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                        printf("Error: wolfSSL_accept %d\n", status);
+                        printf("Error: wolfSSL_accept %d\n", ret);
                         #endif
                         /* Checking for DECRYPT_ERROR indicates if the wrong PSK
                          * was used. Checking for PSK_KEY_ERROR indicates if an
                          * invalid client identity is sent to the server. */
-                        if (status == DECRYPT_ERROR || status == PSK_KEY_ERROR)
+                        if (ret == DECRYPT_ERROR || ret == PSK_KEY_ERROR)
                             gAuthFailCount++;
                         status = 1;
                     }
@@ -555,7 +560,7 @@ KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
             {
 
                 /* Reset the client request activity timeout.  */
-                tcp_activity_timeout[i] = TCP_ACTIVITY_TIMEOUT;
+                tcp_activity_timeout[i] = TCP_TIMEOUT_ACTIVITY;
 
                 /* Update number of current open connections.  */
                 tcp_open_connections++;
@@ -572,8 +577,7 @@ KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
 static void tcp_data_process(int clients, KeyServerReqPktCb reqCb)
 {
 
-UINT                        i;
-UINT                        status;
+int                         i;
 __attribute__((__section__(".bss_sdram"))) static CmdPacket_t reqPkt;
 unsigned char *req = (unsigned char*)&reqPkt;
 unsigned char *resp;
@@ -589,7 +593,7 @@ int n;
         {
 
             /* Reset the client request activity timeout.  */
-            tcp_activity_timeout[i] = TCP_ACTIVITY_TIMEOUT;
+            tcp_activity_timeout[i] = TCP_TIMEOUT_ACTIVITY;
 
             XMEMSET(req, 0, sizeof(CmdPacket_t));
             n = wolfSSL_read(ssl[i], req, sizeof(CmdPacket_t));
@@ -632,10 +636,10 @@ int n;
     }
 }
 
-static tcp_disconnect_process(int clients)
+static void tcp_disconnect_process(int clients)
 {
 
-UINT                        i;
+int                         i;
 UINT                        status;
 UINT                        reset_client_request;
 
@@ -725,7 +729,7 @@ UINT                        reset_client_request;
 static void tcp_timeout_processing(int clients)
 {
 
-UINT                        i;
+int                         i;
 
     /* Now look through all the sockets.  */
     for (i = 0; i < clients; i++)
@@ -1050,6 +1054,8 @@ exit:
     {
         listenfd = &tcpSock[idx];
         KeySocket_Delete(&listenfd);
+        wolfSSL_free(ssl[idx]);
+        XFREE(ssl, heap, DYNAMIC_TYPE_TMP_BUFFER);
     }
     XFREE(tcpSock, heap, DYNAMIC_TYPE_TMP_BUFFER);
     tcpSock = NULL;
@@ -1060,10 +1066,10 @@ exit:
     KeySocket_Unaccept(listenfd);
     KeySocket_Unlisten(gKeyServPort);
     KeySocket_Delete(&listenfd);
+    wolfSSL_free(ssl);
 #endif
 
     /* free up memory used by wolfSSL */
-    wolfSSL_free(ssl);
     wolfSSL_CTX_free(ctx);
 
     return ret;
@@ -1170,11 +1176,11 @@ void KeyServer_Stop(void)
 /*
  *psk client set up.
  */
-static inline unsigned int KeyClient_PskCb(WOLFSSL* ssl, const char* hint,
+static inline unsigned int KeyClient_PskCb(WOLFSSL* ignore, const char* hint,
         char* identity, unsigned int id_max_len, unsigned char* key,
         unsigned int key_max_len)
 {
-    (void)ssl;
+    (void)ignore;
     (void)hint;
 
     XSTRNCPY(identity, CLIENT_IDENTITY, id_max_len);
@@ -1190,7 +1196,7 @@ static inline unsigned int KeyClient_PskCb(WOLFSSL* ssl, const char* hint,
 /*
  * Handles request / response from server.
  */
-static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* msgLen)
+static int KeyClient_Perform(WOLFSSL* pSsl, int type, unsigned char* msg, int* msgLen)
 {
     int ret = 0, n;
     CmdPacket_t reqPkt;
@@ -1205,8 +1211,8 @@ static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* ms
     reqPkt.header.id = gPeerId;
 
     /* write request to the server */
-    if (wolfSSL_write(ssl, req, sizeof(reqPkt.header)) != sizeof(reqPkt.header)) {
-        ret = wolfSSL_get_error(ssl, 0);
+    if (wolfSSL_write(pSsl, req, sizeof(reqPkt.header)) != sizeof(reqPkt.header)) {
+        ret = wolfSSL_get_error(pSsl, 0);
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyClient_Perform: Write error %d to Server\n", ret);
     #endif
@@ -1214,8 +1220,8 @@ static int KeyClient_Perform(WOLFSSL* ssl, int type, unsigned char* msg, int* ms
     }
 
     /* read response from server */
-    if (wolfSSL_read(ssl, resp, sizeof(respPkt)) < 0 ) {
-        ret = wolfSSL_get_error(ssl, 0);
+    if (wolfSSL_read(pSsl, resp, sizeof(respPkt)) < 0 ) {
+        ret = wolfSSL_get_error(pSsl, 0);
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyClient_Perform: Server terminate with error %d!\n", ret);
     #endif
@@ -1257,7 +1263,7 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr,
     #endif
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
 #endif
-    WOLFSSL* ssl = NULL;
+    WOLFSSL* pSsl = NULL;
     WOLFSSL_CTX* ctx = NULL;
 
     (void)heap;
@@ -1318,7 +1324,7 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr,
     }
 
     /* creat wolfssl object after each tcp connct */
-    if ( (ssl = wolfSSL_new(ctx)) == NULL) {
+    if ( (pSsl = wolfSSL_new(ctx)) == NULL) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("wolfSSL_new error\n");
     #endif
@@ -1327,16 +1333,16 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr,
 
     /* associate the file descriptor with the session */
 #ifdef HAVE_NETX
-    wolfSSL_SetIO_NetX(ssl, sockfd, KEY_SERVICE_RECV_TIMEOUT);
+    wolfSSL_SetIO_NetX(pSsl, sockfd, KEY_SERVICE_RECV_TIMEOUT);
 #else
-    ret = wolfSSL_set_fd(ssl, sockfd);
+    ret = wolfSSL_set_fd(pSsl, sockfd);
     if (ret != SSL_SUCCESS)
         goto exit;
 
 #endif
 
     /* perform request and return response */
-    ret = KeyClient_Perform(ssl, reqType, msg, msgLen);
+    ret = KeyClient_Perform(pSsl, reqType, msg, msgLen);
     if (ret != 0)
         goto exit;
 
@@ -1348,13 +1354,13 @@ exit:
     }
 #endif
 
-    wolfSSL_shutdown(ssl);
+    wolfSSL_shutdown(pSsl);
     KeySocket_Close(&sockfd);
     KeySocket_Unbind(sockfd);
     KeySocket_Delete(&sockfd);
 
     /* cleanup */
-    wolfSSL_free(ssl);
+    wolfSSL_free(pSsl);
 
     /* when completely done using SSL/TLS, free the
      * wolfssl_ctx object */

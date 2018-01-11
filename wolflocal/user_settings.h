@@ -50,7 +50,7 @@
 #define WOLFLOCAL_LOGGING_LEVEL 3
 #if 1
 //#define DEBUG_WOLFSSL
-#define WOLFSSL_DEBUG_MEMORY
+//#define WOLFSSL_DEBUG_MEMORY
 /* Enabling WOLFSSL_DEBUG_MEMORY requires modifying the file memory.c. It
  * calls printf() directly, and if you don't have it you'll get an error. */
 #endif
@@ -66,4 +66,5 @@
 
 #define KEY_SOCKET_RECVFROM_TIMEOUT 300
 
+int mySeed(unsigned char*, unsigned int);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)

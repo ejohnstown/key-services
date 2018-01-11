@@ -5,9 +5,12 @@
 #include "wolfcast.h"
 #include <wolfssl/error-ssl.h>
 
+NX_IP *BSP_IP_POINTER = NULL;
+NX_PACKET_POOL *BSP_POOL_POINTER = NULL;
 
 /* mySeed() and LowResTimer() are application defined functions
  * needed by wolfSSL. */
+
 int mySeed(unsigned char* output, unsigned int sz)
 {
     unsigned int i;
@@ -70,12 +73,12 @@ static void FilteredLog(int level, const char* fmt, ...)
 #define KS_TIMEOUT_NETWORK_READY KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_CLIENT KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_WOLFLOCAL_KEY_POLL KS_TIMEOUT_1SEC
-#define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
+//#define KS_TIMEOUT_WOLFCAST KS_TIMEOUT_1SEC
 #define KS_TIMEOUT_KEY_STATE_WRITE TX_WAIT_FOREVER
 #define KS_TIMEOUT_KEY_STATE_READ TX_NO_WAIT
 
-#define SERVER_ID 5
-#define FOREIGN_CLIENT_ID 23
+//#define SERVER_ID 5
+//#define FOREIGN_CLIENT_ID 23
 
 #ifndef WOLFLOCAL_KEY_SWITCH_TIME
     #define WOLFLOCAL_KEY_SWITCH_TIME 15
@@ -83,9 +86,9 @@ static void FilteredLog(int level, const char* fmt, ...)
 #ifndef WOLFLOCAL_KEY_CHANGE_PERIOD
     #define WOLFLOCAL_KEY_CHANGE_PERIOD 60
 #endif
-#ifndef WOLFLOCAL_FIND_MASTER_PERIOD
-    #define WOLFLOCAL_FIND_MASTER_PERIOD 5
-#endif
+//#ifndef WOLFLOCAL_FIND_MASTER_PERIOD
+//    #define WOLFLOCAL_FIND_MASTER_PERIOD 5
+//#endif
 #ifndef WOLFLOCAL_STATS_PERIOD
     #define WOLFLOCAL_STATS_PERIOD 60
 #endif
@@ -240,7 +243,7 @@ KeyServerEntry(ULONG ignore)
     {
         struct in_addr inaddr;
         inaddr.s_addr = gAddr;
-        result = KeyServer_Init(gHeapHint, &inaddr, gBcastPort, gServPort);
+        result = KeyServer_Init(gHeapHint, &inaddr);
     }
 
     if (result != 0) {
@@ -250,7 +253,7 @@ KeyServerEntry(ULONG ignore)
     tx_event_flags_set(&gEventFlags, KS_EVENT_ADDR, TX_OR);
 
     if (result == 0) {
-        result = KeyServer_Run(keyServerCb, gHeapHint);
+        result = KeyServer_Run(keyServerCb, 99, gHeapHint);
         if (result != 0) {
             WOLFLOCAL_LOG(2, "KeyServer terminated. (%d)\n", result);
         }
@@ -486,7 +489,7 @@ void
 WolfLocalInit(wolfWrapper_t *wrapper, UCHAR id)
 {
     UINT status;
-    int i;
+    //int i;
 
     status = tx_event_flags_create(&gEventFlags, "WolfLocal Event Flags");
     if (status != TX_SUCCESS)
@@ -686,7 +689,8 @@ void WolfLocalTimer(void)
     }
 
     if ((count % WOLFLOCAL_STATS_PERIOD) == 0) {
-        unsigned int ks, mac, replay, epoch, i;
+        unsigned int ks, mac, replay, epoch;
+//        unsigned int i;
 
         ks = KeyServer_GetAuthFailCount();
         WOLFLOCAL_LOG(3, "Key Server auth fail counts: %u\n", ks);
@@ -1070,8 +1074,8 @@ int wolfWrapper_Update(wolfWrapper_t* wrapper)
             status = wolfSSL_set_secret(newSsl, wrapper->newEpoch,
                             wrapper->keyState.pms,
                             sizeof(wrapper->keyState.pms),
-                            wrapper->keyState.clientRandom,
-                            wrapper->keyState.serverRandom,
+                            wrapper->keyState.clientRandom[0],
+                            wrapper->keyState.serverRandom[0],
                             wrapper->keyState.suite);
             if (status != SSL_SUCCESS) {
                 error = 1;

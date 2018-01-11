@@ -673,7 +673,7 @@ exit:
     }
 #endif
 
-    #define GROUP_ADDR 0xE2000003
+//    #define GROUP_ADDR 0xE2000003
 
 extern UINT gGetNewKey;
 extern UINT gSwitchKeys[3];
