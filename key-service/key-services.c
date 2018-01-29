@@ -1643,14 +1643,16 @@ void KeyServices_Init(unsigned char peerId,
 
 
 
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void* heap)
+int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, void* heap)
 {
     int                 ret = 0;
 #ifdef HAVE_NETX
-    NX_UDP_SOCKET realSock;
-    KS_SOCKET_T listenfd = (KS_SOCKET_T)&realSock;
+    NX_UDP_SOCKET realListenSock, realSendSock;
+    KS_SOCKET_T listenfd = (KS_SOCKET_T)&realListenSock;
+    KS_SOCKET_T sendfd = (KS_SOCKET_T)&realSendSock;
 #else
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
+    KS_SOCKET_T sendfd = KS_SOCKET_T_INIT;
 #endif
     const unsigned long inAddrAny = INADDR_ANY;
     int n;
@@ -1669,10 +1671,14 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
     }
 
     /* copy address to global for key change */
-    XMEMCPY(&gKeyServAddr, srvAddr, sizeof(struct in_addr));
+    //XMEMCPY(&gKeyServAddr, srvAddr, sizeof(struct in_addr));
 
-    /* create socket */
+    /* create sockets */
     ret = KeySocket_CreateUdpSocket(&listenfd);
+    if (ret != 0) {
+        goto exit;
+    }
+    ret = KeySocket_CreateUdpSocket(&sendfd);
     if (ret != 0) {
         goto exit;
     }
@@ -1680,11 +1686,13 @@ int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb reqCb, void*
     /* setup socket as non-blocking */
     KeySocket_SetNonBlocking(listenfd);
 
-    /* enable broadcast */
-    KeySocket_SetBroadcast(listenfd);
-
     /* setup socket listener */
     ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyBcastPort, 1);
+    if (ret != 0)
+        goto exit;
+
+    /* join multicast group */
+    ret = KeySocket_SetIpMembership(listenfd, mcastAddr, (const struct in_addr*)&inAddrAny);
     if (ret != 0)
         goto exit;
 

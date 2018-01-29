@@ -317,7 +317,7 @@ KeyBcastUdpEntry(ULONG ignore)
     else
         WOLFLOCAL_LOG(1, "KeyBcastUdpEntry failed to get event flags\n");
 
-    result = KeyBcast_RunUdp(&gKeySrvAddr, broadcastCb, gHeapHint);
+    result = KeyBcast_RunUdp(&gGroupAddr, broadcastCb, gHeapHint);
     if (result != 0) {
         WOLFLOCAL_LOG(2, "KeyBcastUdp terminated. (%d)\n", result);
     }
@@ -367,7 +367,7 @@ KeyClientEntry(ULONG ignore)
         }
 
         if (findMaster) {
-        	gKeySrvAddr.s_addr = gAddr;
+        	gKeySrvAddr = gGroupAddr;
             result = KeyClient_FindMaster(&gKeySrvAddr, gHeapHint);
             if (result != 0) {
                 WOLFLOCAL_LOG(3, "Key server didn't announce itself.\n");
