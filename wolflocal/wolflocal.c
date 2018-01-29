@@ -5,9 +5,6 @@
 #include "wolfcast.h"
 #include <wolfssl/error-ssl.h>
 
-NX_IP *BSP_IP_POINTER = NULL;
-NX_PACKET_POOL *BSP_POOL_POINTER = NULL;
-
 /* mySeed() and LowResTimer() are application defined functions
  * needed by wolfSSL. */
 
@@ -161,6 +158,7 @@ static const unsigned short gServPort = 11111;
 
 
 extern NX_IP* nxIp;
+extern NX_PACKET_POOL* nxPool;
 extern unsigned short gKeyServerEpoch;
 extern unsigned char gPeerId;
 
@@ -876,8 +874,8 @@ int wolfWrapper_Init(wolfWrapper_t* wrapper,
     wrapper->groupPort = groupPort;
     wrapper->peerIdList = peerIdList;
     wrapper->peerIdListSz = peerIdListSz;
-    wrapper->ip = BSP_IP_POINTER;
-    wrapper->pool = BSP_POOL_POINTER;
+    wrapper->ip = nxIp;
+    wrapper->pool = nxPool;
 
     ret = wolfSSL_CTX_load_static_memory(&wrapper->ctx,
                                          wolfDTLSv1_2_client_method_ex,
