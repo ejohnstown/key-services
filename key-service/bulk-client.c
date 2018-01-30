@@ -41,7 +41,7 @@ static void FilteredLog(int level, const char* fmt, ...)
 #define XERR(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
 
 
-#define MAX_THREAD_COUNT 100
+#define MAX_THREAD_COUNT 3
 #define IP_ADDR_OFFSET 21
 const char gNetworkBase[] = "192.168.20";
 const char gMcastAddr[] = "226.0.0.3";
@@ -371,7 +371,7 @@ int main(int argc, char* argv[])
     if (status != 0)
         XLOG(1, "0: thread TIMER failed (%d)\n", status);
 
-    status = KeyBcast_RunUdp(&blInfo.addr.sin_addr, KeyBcastCallback, NULL);
+    status = KeyBcast_RunUdp(&gInfo.mcastAddr.sin_addr, KeyBcastCallback, NULL);
     if (status != 0) {
         XLOG(1, "KeyBcast failed %d\n", status);
         goto exit;
