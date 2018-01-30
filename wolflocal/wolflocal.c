@@ -141,7 +141,7 @@ LINK_SECTION(bss_sdram) ULONG gAddr = 0;
 LINK_SECTION(bss_sdram) ULONG gMask = 0;
 
 /* Group address for the wolfCast multicast group. */
-static const struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
+const struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
 
 /* Port number for the wolfCast multicast group. */
 static const unsigned short gGroupPort = 12345;
@@ -504,6 +504,7 @@ WolfLocalInit(wolfWrapper_t *wrapper, UCHAR id)
         WOLFLOCAL_LOG(1, "couldn't initialize the KeySocket\n");
         return;
     }
+    KeyServices_Init(id, gBcastPort, gServPort);
 
     status = tx_mutex_create(&gKeyStateMutex, "key state mutex",
                              TX_NO_INHERIT);

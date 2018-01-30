@@ -109,6 +109,18 @@ int KeySocket_SetIpMembership(KS_SOCKET_T sockFd,
 #ifdef HAVE_NETX
     (void)sockFd;
     (void)ifcaddr;
+    ret = nx_igmp_enable(nxIp);
+    if (ret == NX_ALREADY_ENABLED) {
+#if KEY_SOCKET_LOGGING_LEVEL >= 3
+        printf("IGMP already enabled\n");
+#endif
+    }
+    else if (ret != NX_SUCCESS) {
+#if KEY_SOCKET_LOGGING_LEVEL >= 1
+        printf("cannot enable IGMP\n");
+#endif
+        return -1;
+    }
     ret = nx_igmp_multicast_join(nxIp, multiaddr->s_addr);
     if (ret != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1

@@ -1113,6 +1113,8 @@ int KeyServer_GenNewKey(void* heap)
     return ret;
 }
 
+extern const struct in_addr gGroupAddr;
+
 int KeyServer_NewKeyUse(void* heap)
 {
     int ret;
@@ -1120,8 +1122,8 @@ int KeyServer_NewKeyUse(void* heap)
     ret = KeyReq_BuildKeyUse(heap);
 
     if (ret == 0) {
-        struct in_addr any = { 0 };
-        ret = KeyClient_NetUdpBcast(&any,
+        struct in_addr groupAddr = gGroupAddr;
+        ret = KeyClient_NetUdpBcast(&groupAddr,
             gRespPktLen[CMD_PKT_TYPE_KEY_USE],
             (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_USE], 0, NULL);
     }
@@ -1136,8 +1138,8 @@ int KeyServer_NewKeyChange(void* heap)
     ret = KeyReq_BuildKeyChange(heap);
 
     if (ret == 0) {
-        struct in_addr any = { 0 };
-        ret = KeyClient_NetUdpBcast(&any,
+        struct in_addr groupAddr = gGroupAddr;
+        ret = KeyClient_NetUdpBcast(&groupAddr,
             gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
             (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
     }
@@ -1376,7 +1378,6 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 #ifdef HAVE_NETX
     NX_UDP_SOCKET realSock;
     KS_SOCKET_T sockfd = (KS_SOCKET_T)&realSock;
-    ULONG addr = 0, mask = 0;
 #else
     KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
     struct timeval to = {1, 0};
@@ -1398,15 +1399,15 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
         goto exit;
     }
 
-    /* enable broadcast */
-    KeySocket_SetBroadcast(sockfd);
+//    /* enable broadcast */
+//    KeySocket_SetBroadcast(sockfd);
 
     /* build broadcast addr */
     XMEMSET(&clientAddr, 0, sizeof(clientAddr));
     clientAddr.sin_family = AF_INET;
     clientAddr.sin_port = htons(gKeyBcastPort);
-#ifndef HAVE_NETX
     clientAddr.sin_addr = *srvAddr;
+#ifndef HAVE_NETX
     ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr,
         0, 1);
     if (ret != 0) {
@@ -1414,23 +1415,22 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     }
     KeySocket_SetSockOpt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));
 #else
-    (void)srvAddr;
     ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr,
         KS_ANY_PORT, 1);
     if (ret != 0) {
         goto exit;
     }
 
-    /* Derive and set broadcast address. */
-    ret = nx_ip_address_get(nxIp, &addr, &mask);
-    if (ret != NX_SUCCESS) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("KeyClient_NetUdpBcast Error: ip address get %d\n", ret);
-    #endif
-        ret = -1;
-        goto exit;
-    }
-    clientAddr.sin_addr.s_addr = addr | ~mask;
+//    /* Derive and set broadcast address. */
+//    ret = nx_ip_address_get(nxIp, &addr, &mask);
+//    if (ret != NX_SUCCESS) {
+//    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+//        printf("KeyClient_NetUdpBcast Error: ip address get %d\n", ret);
+//    #endif
+//        ret = -1;
+//        goto exit;
+//    }
+//    clientAddr.sin_addr.s_addr = addr | ~mask;
 #endif
 
     /* send broadcast */
