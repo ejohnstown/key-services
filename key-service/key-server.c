@@ -92,7 +92,7 @@ int main(int argc, char **argv)
 #endif
 
     if (argc < 3) {
-        printf("Usage: %s <address> <bcast address>\n", argv[0]);
+        printf("Usage: %s <address> <mcast address>\n", argv[0]);
         goto exit;
     }
 

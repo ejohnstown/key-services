@@ -46,6 +46,8 @@ static void FilteredLog(int level, const char* fmt, ...)
 const char gNetworkBase[] = "192.168.20";
 const char gMcastAddr[] = "226.0.0.3";
 
+const struct in_addr gGroupAddr = { .s_addr = 0xE2000003 };
+
 
 typedef struct ginfo_t {
     pthread_mutex_t mutex;
