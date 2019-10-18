@@ -26,11 +26,6 @@
         #include "types.h"
     #endif
     #include "nx_api.h"
-    #ifdef PGB000
-        #include "pgb000_com.h"
-    #else
-        #include "pgb002_ap2.h"
-    #endif
 
     #define KS_ANY_PORT        NX_ANY_PORT
     #define KS_SOCKET_T        NX_TCP_SOCKET*

@@ -17,7 +17,6 @@ typedef struct wolfWrapper_t {
 	WOLFSSL* prevSsl;
 	unsigned short prevEpoch;
 	unsigned short epoch;
-	unsigned short newEpoch;
 	KeyRespPacket_t keyState;
 	UINT keySet;
 	UINT switchKeys;
@@ -43,7 +42,6 @@ struct in_addr WolfLocalGetKeySrvAddr(void);
 
 int wolfWrapper_Init(wolfWrapper_t*, UCHAR, USHORT, ULONG,
 					 const USHORT*, UINT, void*, UINT);
-int wolfWrapper_Update(wolfWrapper_t*);
 int wolfWrapper_Write(wolfWrapper_t*, const void*, int);
 void wolfWrapper_Read_Packet(wolfWrapper_t*, NX_PACKET*, USHORT*, void*, int, int*);
 int wolfWrapper_Read(wolfWrapper_t*, USHORT*, void*, int);

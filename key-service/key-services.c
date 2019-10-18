@@ -9,7 +9,6 @@
 #endif
 #include <wolfssl/error-ssl.h>
 
-//#define HAVE_NETX
 #ifdef HAVE_NETX
 #include    "nx_api.h"
 #include    "tx_api.h"
@@ -22,6 +21,11 @@
 
 //#define KEY_SERVICE_FORCE_CLIENT_TO_USE_NET /* for testing */
 
+#if defined(NETX) && defined(__RX__)
+	#define MEMORY_SECTION_BSS LINK_SECTION(bss_sdram)
+#else
+	#define MEMORY_SECTION_BSS
+#endif
 #ifdef HAVE_NETX
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         #define printf bsp_debug_printf
@@ -29,16 +33,18 @@
     #define htons(x) (x)
     extern NX_IP *nxIp;
     #define THREAD_LOCAL
-    __attribute__((__section__(".bss_sdram"))) static unsigned int tcp_connection_requests;
-    __attribute__((__section__(".bss_sdram"))) static unsigned int tcp_open_connections;
-    __attribute__((__section__(".bss_sdram"))) static unsigned int tcp_activity_timeouts;
-    __attribute__((__section__(".bss_sdram"))) static unsigned int tcp_relisten_errors;
-    __attribute__((__section__(".bss_sdram"))) static NX_TCP_SOCKET *tcpSock;
-    __attribute__((__section__(".bss_sdram"))) static int *tcp_activity_timeout;
-    __attribute__((__section__(".bss_sdram"))) static TX_EVENT_FLAGS_GROUP tcp_event_flags;
-    __attribute__((__section__(".bss_sdram"))) static WOLFSSL **ssl;
-#define TCP_TIMEOUT_ACTIVITY     60        /* Seconds allowed with no activity                  */
-#define TCP_TIMEOUT_PERIOD         60           /* Number of seconds to check                        */
+    MEMORY_SECTION_BSS static unsigned int tcp_total_clients;
+    MEMORY_SECTION_BSS static unsigned int tcp_connection_requests;
+    MEMORY_SECTION_BSS static unsigned int tcp_open_connections;
+    MEMORY_SECTION_BSS static unsigned int tcp_activity_timeouts;
+    MEMORY_SECTION_BSS static NX_TCP_SOCKET *tcpSock;
+    MEMORY_SECTION_BSS static int *tcp_activity_timeout;
+    MEMORY_SECTION_BSS static int *tcp_wolfSSL_accepted;
+    MEMORY_SECTION_BSS static TX_EVENT_FLAGS_GROUP tcp_event_flags;
+    MEMORY_SECTION_BSS static TX_TIMER key_server_timer;
+    MEMORY_SECTION_BSS static WOLFSSL **ssl;
+#define TCP_TIMEOUT_ACTIVITY      2        /* Seconds allowed with no activity                  */
+#define TCP_TIMEOUT_PERIOD        1        /* Number of seconds to check                        */
 #define TCP_TIMEOUT            (10 * NX_IP_PERIODIC_RATE)
 #define TCP_CONNECT            0x01        /* TCP connection is present                         */
 #define TCP_DISCONNECT         0x02        /* TCP disconnection is present                      */
@@ -59,35 +65,29 @@
 /*----------------------------------------------------------------------------*/
 
 /* Generic responses for all supported packet types */
-static THREAD_LOCAL CmdPacket_t*   gRespPkt[CMD_PKT_TYPE_COUNT];
-static THREAD_LOCAL int            gRespPktLen[CMD_PKT_TYPE_COUNT];
-static THREAD_LOCAL volatile int   gKeyServerInitDone = 0;
-static THREAD_LOCAL int            gKeyServerRunning = 0;
-static THREAD_LOCAL int            gKeyServerStop = 0;
-       THREAD_LOCAL unsigned short gKeyServerEpoch;
-static THREAD_LOCAL struct in_addr gKeyServAddr;
-       THREAD_LOCAL unsigned char  gPeerId = 0;
-static THREAD_LOCAL unsigned short gKeyServPort;
-static THREAD_LOCAL unsigned short gKeyBcastPort;
+    MEMORY_SECTION_BSS static THREAD_LOCAL CmdPacket_t*   gRespPkt[CMD_PKT_TYPE_COUNT];
+    MEMORY_SECTION_BSS static THREAD_LOCAL int            gRespPktLen[CMD_PKT_TYPE_COUNT];
+    MEMORY_SECTION_BSS static THREAD_LOCAL volatile int   gKeyServerInitDone = 0;
+    MEMORY_SECTION_BSS        THREAD_LOCAL int            gKeyServerRunning = 0;
+    MEMORY_SECTION_BSS static THREAD_LOCAL int            gKeyServerStop = 0;
+    MEMORY_SECTION_BSS		  THREAD_LOCAL unsigned short gKeyServerEpoch;
+    MEMORY_SECTION_BSS static THREAD_LOCAL struct in_addr gKeyServAddr;
+    MEMORY_SECTION_BSS   	  THREAD_LOCAL unsigned char  gPeerId = 0;
+    MEMORY_SECTION_BSS static THREAD_LOCAL unsigned short gKeyServPort;
+    MEMORY_SECTION_BSS static THREAD_LOCAL unsigned short gKeyBcastPort;
 #ifndef NO_KEY_SERVER
-    static THREAD_LOCAL unsigned int   gAuthFailCount = 0;
+    MEMORY_SECTION_BSS static THREAD_LOCAL unsigned int   gAuthFailCount = 0;
 #endif
 
 #ifdef WOLFSSL_STATIC_MEMORY
-    #if defined(NETX) && defined(PGB002)
-        #define MEMORY_SECTION LINK_SECTION(data_sdram)
-    #else
-        #define MEMORY_SECTION
-    #endif
-
     #if defined(NETX)
         /* Under NetX we'll have only one client thread. Non-NetX
          * will use a local buffer in the function since there can
          * be multiple clients. */
-        static MEMORY_SECTION byte clientMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
+    	MEMORY_SECTION_BSS static byte clientMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
     #endif
     #ifndef NO_KEY_SERVER
-        static MEMORY_SECTION byte serverMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
+    	MEMORY_SECTION_BSS static byte serverMemory[WOLFLOCAL_STATIC_MEMORY_SZ];
     #endif
 #endif
 
@@ -120,10 +120,11 @@ static unsigned int KeyServer_PskCb(WOLFSSL* ignore, const char* identity,
         return 0;
     }
 
-    if (key_max_len > sizeof(g_TlsPsk)) {
-        key_max_len = sizeof(g_TlsPsk);
+// Hack to allow change of TLS key for demonstration of authentication failure
+    if (key_max_len > tls_pre_shared_key_length) {
+        key_max_len = tls_pre_shared_key_length;
     }
-    XMEMCPY(key, g_TlsPsk, key_max_len);
+    XMEMCPY(key, tls_pre_shared_key, key_max_len);
 
     return key_max_len;
 }
@@ -151,9 +152,12 @@ static inline int BuildPacket(CmdPacket_t** pPkt, int type, int msgLen,
             heap, DYNAMIC_TYPE_TMP_BUFFER);
     }
     pkt = gRespPkt[type];
-    if (pkt == NULL)
+    if (pkt == NULL) {
+	#if KEY_SERVICE_LOGGING_LEVEL >= 1
+    	printf("BuildPacket XMALLOC failed!\n");
+	#endif
         return MEMORY_E;
-
+    }
     /* populate packet header */
     pkt->header.version = CMD_PKT_VERSION;
     pkt->header.type = type;
@@ -221,15 +225,11 @@ static int KeyReq_BuildKeyReq_Ex(unsigned short epoch,
         }
         if (serverRandom) {
             if (serverRandomSz > RAND_SIZE) serverRandomSz = RAND_SIZE;
-            XMEMCPY(pkt->msg.keyResp.serverRandom[0], serverRandom, serverRandomSz);
-            XMEMCPY(pkt->msg.keyResp.serverRandom[1], serverRandom, serverRandomSz);
-            XMEMCPY(pkt->msg.keyResp.serverRandom[2], serverRandom, serverRandomSz);
+            XMEMCPY(pkt->msg.keyResp.serverRandom, serverRandom, serverRandomSz);
         }
         if (clientRandom) {
             if (clientRandomSz > RAND_SIZE) clientRandomSz = RAND_SIZE;
-            XMEMCPY(pkt->msg.keyResp.clientRandom[0], clientRandom, clientRandomSz);
-            XMEMCPY(pkt->msg.keyResp.clientRandom[1], clientRandom, clientRandomSz);
-            XMEMCPY(pkt->msg.keyResp.clientRandom[2], clientRandom, clientRandomSz);
+            XMEMCPY(pkt->msg.keyResp.clientRandom, clientRandom, clientRandomSz);
         }
     }
 
@@ -292,8 +292,8 @@ static int KeyReq_Check(CmdPacket_t* reqPkt, int privacy)
     /* get size */
     ato16(reqPkt->header.size, &size);
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
-    printf("Request: Version %d, Cmd %d, Size %d\n",
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+    printf("Request: Version %hhu, Cmd %hhu, Size %hu\n",
         reqPkt->header.version, reqPkt->header.type, size);
 #endif
 
@@ -398,7 +398,7 @@ static int KeyServer_InitCtx(WOLFSSL_CTX** pCtx, wolfSSL_method_func method_func
     (void)heap;
     ret = wolfSSL_CTX_load_static_memory(
             &ctx, method_func,
-            serverMemory, sizeof(serverMemory), 0, 2);
+            serverMemory, sizeof(serverMemory), 0, KEY_SERVICE_TCP_CLIENTS);
     if (ret != SSL_SUCCESS) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("Error: unable to load static memory and create ctx\n");
@@ -437,6 +437,9 @@ static void tcp_data_present(NX_TCP_SOCKET *socket_ptr)
     (void)socket_ptr;
     /* Set the data event flag.  */
     tx_event_flags_set(&tcp_event_flags, TCP_DATA, TX_OR);
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+	printf("tcp_data_present socket state = %u packets = %u\n", socket_ptr->nx_tcp_socket_state, socket_ptr->nx_tcp_socket_receive_queue_count);
+#endif
 }
 
 static void tcp_connection_present(NX_TCP_SOCKET *socket_ptr, UINT port)
@@ -445,48 +448,91 @@ static void tcp_connection_present(NX_TCP_SOCKET *socket_ptr, UINT port)
     (void)port;
     /* Set the connect event flag.  */
     tx_event_flags_set(&tcp_event_flags, TCP_CONNECT, TX_OR);
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+	printf("tcp_connection_present\n");
+#endif
 }
 
 static void tcp_disconnect_present(NX_TCP_SOCKET *socket_ptr)
 {
     (void)socket_ptr;
     tx_event_flags_set(&tcp_event_flags, TCP_DISCONNECT, TX_OR);
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+	printf("tcp_disconnect_present\n");
+#endif
+}
+
+static void tcp_timeout_present(ULONG ignore)
+{
+    (void)ignore;
+
+    tx_event_flags_set(&tcp_event_flags, TCP_ACTIVITY_TIMEOUT, TX_OR);
+}
+
+static void tcp_relisten(int clients)
+{
+	int             i;
+	UINT            status;
+	NX_TCP_SOCKET	*socket;
+
+	for (i = 0; i < clients; i++)
+    {
+
+		socket = &tcpSock[i];
+
+        /* Now see if this socket is closed.  */
+        if (socket->nx_tcp_socket_state == NX_TCP_CLOSED)
+        {
+
+            /* Relisten on this socket.  */
+            status =  nx_tcp_server_socket_relisten(nxIp, gKeyServPort, socket);
+            /* Check for bad status.  */
+            if ((status != NX_SUCCESS) && (status != NX_CONNECTION_PENDING) && (status != NX_INVALID_RELISTEN))
+            {
+            	if (status != NX_ALREADY_BOUND)
+            	{
+            		/* Increment the error count and keep trying.  */
+					#if KEY_SERVICE_LOGGING_LEVEL >= 1
+            			printf("error: socket %d relisten %d\n", i, status);
+                	#endif
+            	}
+
+                continue;
+            }
+
+			#if KEY_SERVICE_LOGGING_LEVEL >= 2
+            	printf("Re-listen successful on socket %d 0x%x\n", i, socket);
+			#endif
+            /* Break out of loop.  */
+            break;
+        }
+    }
+}
+
+static int wolfSSL_handshake_done_callback(WOLFSSL* the_ssl, void* ctx)
+{
+	int i;
+	(void) ctx;
+
+	for (i = 0; i < tcp_total_clients; i++)
+	{
+		if (the_ssl == ssl[i])
+		{
+            tcp_wolfSSL_accepted[i] = TRUE;
+            return 0;
+		}
+	}
+	return -1;
 }
 
 static void tcp_connect_process(int clients, WOLFSSL_CTX *ctx)
 {
 
-int                         i;
+volatile int                i;
 UINT                        status;
 int                         ret;
 KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
-
-    /* Now look for a socket that is closed to relisten on.  */
-    for (i = 0; i < clients; i++)
-    {
-
-        /* Now see if this socket is closed.  */
-        if (tcpSock[i].nx_tcp_socket_state == NX_TCP_CLOSED)
-        {
-
-            /* Relisten on this socket.  */
-            status =  nx_tcp_server_socket_relisten(nxIp, gKeyServPort, &tcpSock[i]);
-            /* Check for bad status.  */
-            if ((status != NX_SUCCESS) && (status != NX_CONNECTION_PENDING)    && (status != NX_INVALID_RELISTEN))
-            {
-            #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("error: connect relisten %d\n", status);
-            #endif
-
-                /* Increment the error count and keep trying.  */
-                tcp_relisten_errors++;
-                continue;
-            }
-
-            /* Break out of loop.  */
-            break;
-        }
-    }
+NX_TCP_SOCKET				*socket;
 
     /* One of the client request sockets is in the process of connection.  */
 
@@ -494,51 +540,48 @@ KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
     for (i = 0; i < clients; i++)
     {
 
+    	socket = &tcpSock[i];
+
         /* Now see if this socket was the one that is in being connected.  */
-        if ((tcpSock[i].nx_tcp_socket_state > NX_TCP_CLOSED) &&
-            (tcpSock[i].nx_tcp_socket_state < NX_TCP_ESTABLISHED) &&
-            (tcpSock[i].nx_tcp_socket_connect_port))
+        if ((socket->nx_tcp_socket_state > NX_TCP_CLOSED) &&
+            (socket->nx_tcp_socket_state < NX_TCP_ESTABLISHED) &&
+            (socket->nx_tcp_socket_connect_port))
         {
 
             /* Yes, we have found the socket being connected.  */
 
             /* Increment the number of connection requests.  */
             tcp_connection_requests++;
+			#if KEY_SERVICE_LOGGING_LEVEL >= 3
+            	printf("tcp_connection_requests: %d\n", tcp_connection_requests);
+			#endif
 
             /* Attempt to accept on this socket.  */
-            ret = KeySocket_Accept(&tcpSock[i], &connfd, 100);
+            ret = KeySocket_Accept(socket, &connfd, 100);
             if (ret > 0)
             {
+            	if (ssl[i] != NULL)
+            	{
+                    wolfSSL_free(ssl[i]);
+					#if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    	printf("Error: wolfSSL old\n");
+					#endif
+            	}
                 /* create WOLFSSL object and respond */
                 if ((ssl[i] = wolfSSL_new(ctx)) == NULL) {
-                #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("Error: wolfSSL_new\n");
-                #endif
-                    ret = MEMORY_E;
+                	#if KEY_SERVICE_LOGGING_LEVEL >= 1
+                    	printf("Error: wolfSSL_new\n");
+                	#endif
+                    status = 1;
                 }
                 else
                 {
                     /* set connection context */
                     wolfSSL_SetIO_NetX(ssl[i], connfd, KEY_SERVICE_RECV_TIMEOUT);
 
-                    ret = wolfSSL_accept(ssl[i]);
-                    if (ret != SSL_SUCCESS)
-                    {
-                        ret = wolfSSL_get_error(ssl[i], status);
-                        #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                        printf("Error: wolfSSL_accept %d\n", ret);
-                        #endif
-                        /* Checking for DECRYPT_ERROR indicates if the wrong PSK
-                         * was used. Checking for PSK_KEY_ERROR indicates if an
-                         * invalid client identity is sent to the server. */
-                        if (ret == DECRYPT_ERROR || ret == PSK_KEY_ERROR)
-                            gAuthFailCount++;
-                        status = 1;
-                    }
-                    else
-                    {
-                        status = 0;
-                    }
+                    tcp_wolfSSL_accepted[i] = FALSE;
+                    (void) wolfSSL_SetHsDoneCb(ssl[i], wolfSSL_handshake_done_callback, ctx);
+                    status = 0;
                 }
             }
             else
@@ -553,84 +596,136 @@ KS_SOCKET_T connfd = KS_SOCKET_T_INIT;
             if (status != 0)
             {
 
-                /* Not successful, simply unaccept on this socket.  */
-                nx_tcp_server_socket_unaccept(&tcpSock[i]);
+                /* Not successful, disconnect & unaccept on this socket.  */
+            	status = nx_tcp_socket_disconnect(socket, TCP_TIMEOUT);
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+            	if (status != NX_SUCCESS)
+            	{
+					printf("tcp socket %d nx_tcp_socket_disconnect %u\n", i, status);
+            	}
+				#endif
+            	status = nx_tcp_server_socket_unaccept(socket);
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+            	if (status != NX_SUCCESS)
+            	{
+					printf("tcp socket %d nx_tcp_server_socket_unaccept %u\n", i, status);
+            	}
+                printf("Connection failed 0x%x on Socket %d 0x%x\n", status , i, socket);
+				#endif
             }
             else
             {
 
-                /* Reset the client request activity timeout.  */
+				#if KEY_SERVICE_LOGGING_LEVEL >= 2
+                printf("Connection to %hhu.%hhu.%hhu.%hhu succeeded on Socket %d 0x%x\n",
+                		BYTE3_OF(socket->nx_tcp_socket_connect_ip), BYTE2_OF(socket->nx_tcp_socket_connect_ip),
+                		BYTE1_OF(socket->nx_tcp_socket_connect_ip), BYTE0_OF(socket->nx_tcp_socket_connect_ip),
+                		i, socket);
+				#endif
+
+            	/* Reset the client request activity timeout.  */
                 tcp_activity_timeout[i] = TCP_TIMEOUT_ACTIVITY;
 
                 /* Update number of current open connections.  */
                 tcp_open_connections++;
+				#if KEY_SERVICE_LOGGING_LEVEL >= 3
+                	printf("tcp socket %d open tcp_open_connections: %d\n", i, tcp_open_connections);
+				#endif
 
             }
-
-            /* In any case break out of the loop when we find a connection - there can only be one
-               at a time!  */
-            break;
         }
     }
+
+    /* Now look for a socket that is closed to relisten on.  */
+    tcp_relisten(clients);
 }
 
 static void tcp_data_process(int clients, KeyServerReqPktCb reqCb)
 {
 
 int                         i;
-__attribute__((__section__(".bss_sdram"))) static CmdPacket_t reqPkt;
+MEMORY_SECTION_BSS static CmdPacket_t reqPkt;
 unsigned char *req = (unsigned char*)&reqPkt;
 unsigned char *resp;
 int ret = 0;
 int n;
+NX_TCP_SOCKET	*socket;
 
     /* Now look for a socket that has receive data.  */
     for (i = 0; i < clients; i++)
     {
 
+		socket = &tcpSock[i];
+
         /* Now see if this socket has data.  If so, process all of it now!  */
-        while (tcpSock[i].nx_tcp_socket_receive_queue_count)
+        while (socket->nx_tcp_socket_receive_queue_count)
         {
 
-            /* Reset the client request activity timeout.  */
+			#if KEY_SERVICE_LOGGING_LEVEL >= 3
+				printf("tcp socket %d data received\n", i);
+			#endif
+
+			/* Reset the client request activity timeout.  */
             tcp_activity_timeout[i] = TCP_TIMEOUT_ACTIVITY;
 
-            XMEMSET(req, 0, sizeof(CmdPacket_t));
-            n = wolfSSL_read(ssl[i], req, sizeof(CmdPacket_t));
-            if (n > 0) {
-                /* check request */
-                ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
-                if (ret < 0) {
-                #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("KeyServer_Run: KeyReq_Check error %d\n", ret);
-                #endif
-                    break;
-                }
+            if (!tcp_wolfSSL_accepted[i])
+            {
+				ret = wolfSSL_accept(ssl[i]);
+				if (ret != SSL_SUCCESS)
+				{
+					ret = wolfSSL_get_error(ssl[i], ret);
+					#if KEY_SERVICE_LOGGING_LEVEL >= 1
+						printf("Error: wolfSSL_accept %d\n", ret);
+					#endif
+					/* Checking for DECRYPT_ERROR indicates if the wrong PSK
+					 * was used. Checking for PSK_KEY_ERROR indicates if an
+					 * invalid client identity is sent to the server. */
+					if (ret == DECRYPT_ERROR || ret == PSK_KEY_ERROR)
+						gAuthFailCount++;
 
-                if (reqCb)
-                    reqCb(&reqPkt);
-                /* This callback may modify the request. */
-
-                if (gKeyServerRunning) {
-                    /* get response */
-                    KeyReq_GetResp(reqPkt.header.type, &resp, &n);
-
-                    /* write response */
-                    if (wolfSSL_write(ssl[i], resp, n) != n) {
-                        ret = wolfSSL_get_error(ssl[i], 0);
-                    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                        printf("KeyServer_Run: write error %d\n", ret);
-                    #endif
-                        break;
-                    }
-                }
+					wolfSSL_free(ssl[i]);
+					ssl[i] = NULL;
+				}
             }
-            if (n < 0) {
-                ret = wolfSSL_get_error(ssl[i], 0);
-            #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("KeyServer_Run: read error %d\n", ret);
-            #endif
-                break;
+            else
+            {
+				XMEMSET(req, 0, sizeof(CmdPacket_t));
+				n = wolfSSL_read(ssl[i], req, sizeof(CmdPacket_t));
+				if (n > 0) {
+					/* check request */
+					ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
+					if (ret < 0) {
+					#if KEY_SERVICE_LOGGING_LEVEL >= 1
+						printf("KeyServer_Run: KeyReq_Check error %d\n", ret);
+					#endif
+						break;
+					}
+
+					if (reqCb)
+						reqCb(&reqPkt);
+					/* This callback may modify the request. */
+
+					if (gKeyServerRunning) {
+						/* get response */
+						KeyReq_GetResp(reqPkt.header.type, &resp, &n);
+
+						/* write response */
+						if (wolfSSL_write(ssl[i], resp, n) != n) {
+							ret = wolfSSL_get_error(ssl[i], 0);
+						#if KEY_SERVICE_LOGGING_LEVEL >= 1
+							printf("KeyServer_Run: write error %d\n", ret);
+						#endif
+							break;
+						}
+					}
+				}
+				if (n <= 0) {
+					ret = wolfSSL_get_error(ssl[i], 0);
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+					printf("KeyServer_Run: read error %d\n", ret);
+				#endif
+					break;
+				}
             }
         }
     }
@@ -640,113 +735,111 @@ static void tcp_disconnect_process(int clients)
 {
 
 int                         i;
-UINT                        status;
 UINT                        reset_client_request;
-
+UINT						status;
+NX_TCP_SOCKET	*socket;
 
     /* Now look for a socket that has a disconnect state.  */
     for (i = 0; i < clients; i++)
     {
 
+		socket = &tcpSock[i];
+
         reset_client_request = NX_FALSE;
 
-       /* Has the socket received a RST packet? If so NetX will put it in a CLOSED or LISTEN state
-          and the socket activity timeout has not been reset yet.  */
-       if (tcpSock[i].nx_tcp_socket_state == NX_TCP_CLOSED)
-       {
-
-            if (tcp_activity_timeout[i] > 0)
-            {
-
+        if (tcp_activity_timeout[i] > 0 && socket->nx_tcp_socket_state < NX_TCP_SYN_SENT)
+        {
                 reset_client_request = NX_TRUE;
-            }
-       }
-       else
-       {
-
+        }
+        else
+        {
             /* Now see if this socket has entered a disconnect state.  */
-            while (tcpSock[i].nx_tcp_socket_state > NX_TCP_ESTABLISHED)
+            if (socket->nx_tcp_socket_state > NX_TCP_ESTABLISHED)
             {
 
                 /* Yes, a disconnect is present, which signals an end of session for TCP request.  */
 
                 /* First, cleanup this socket.  */
-                nx_tcp_socket_disconnect(&tcpSock[i], TCP_TIMEOUT);
-
-                wolfSSL_shutdown(ssl[i]);
-                wolfSSL_free(ssl[i]);
-                ssl[i] = NULL;
+                status = nx_tcp_socket_disconnect(socket, TCP_TIMEOUT);
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+				if (status != NX_SUCCESS)
+				{
+					printf("tcp socket %d nx_tcp_socket_disconnect %u\n", i, status);
+				}
+				#endif
 
                 reset_client_request = NX_TRUE;
             }
-       }
+        }
 
-       /* If this connection is closed, update the TCP data and notify the application of a disconnect. */
-       if (reset_client_request == NX_TRUE)
-       {
+        /* If this connection is closed, update the TCP data and notify the application of a disconnect. */
+        if (reset_client_request == NX_TRUE)
+        {
 
-           /* Unaccept this socket.  */
-           nx_tcp_server_socket_unaccept(&tcpSock[i]);
+    	    /* Unaccept this socket.  */
+    	    status = nx_tcp_server_socket_unaccept(socket);
+			#if KEY_SERVICE_LOGGING_LEVEL >= 1
+			if (status != NX_SUCCESS)
+			{
+				printf("tcp socket %d nx_tcp_server_socket_unaccept %u\n", i, status);
+			}
+			#endif
 
-           /* Reset the client request activity timeout.  */
-           tcp_activity_timeout[i] =  0;
+			#if KEY_SERVICE_LOGGING_LEVEL >= 2
+			printf("Disconnecting socket %d 0x%x - reset client request\n", i, socket);
+			#endif
 
-           /* Update number of current open connections. */
-           if (tcp_open_connections > 0)
-               tcp_open_connections--;
+            /* Reset the client request activity timeout.  */
+            tcp_activity_timeout[i] =  0;
 
-       }
+            /* Update number of current open connections. */
+            if (tcp_open_connections > 0)
+                tcp_open_connections--;
+		    #if KEY_SERVICE_LOGGING_LEVEL >= 3
+            	printf("tcp socket %d closed tcp_open_connections: %d\n", i, tcp_open_connections);
+		    #endif
+
+            if (ssl[i] != NULL)
+            {
+                wolfSSL_free(ssl[i]);
+                ssl[i] = NULL;
+            }
+        }
     }
 
     /* Now look for a socket that is closed to relisten on.  */
-    for (i = 0; i < clients; i++)
-    {
-
-        /* Now see if this socket is closed.  */
-        if (tcpSock[i].nx_tcp_socket_state == NX_TCP_CLOSED)
-        {
-
-            /* Relisten on this socket.  */
-            status =  nx_tcp_server_socket_relisten(nxIp, gKeyServPort, &tcpSock[i]);
-            /* Check for bad status.  */
-            if ((status != NX_SUCCESS) && (status != NX_CONNECTION_PENDING)    && (status != NX_INVALID_RELISTEN))
-            {
-            #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("error: disconnect relisten %d\n", status);
-            #endif
-
-                /* Increment the error count and keep trying.  */
-                tcp_relisten_errors++;
-                continue;
-            }
-
-            /* Break out of loop.  */
-            break;
-        }
-    }
+    tcp_relisten(clients);
 }
 
 static void tcp_timeout_processing(int clients)
 {
 
-int                         i;
+int             i;
+UINT			status;
+NX_TCP_SOCKET	*socket;
+int				timeout;
+int				*timeout_ptr;
 
     /* Now look through all the sockets.  */
     for (i = 0; i < clients; i++)
     {
 
+		socket = &tcpSock[i];
+		timeout_ptr = &tcp_activity_timeout[i];
+		timeout = *timeout_ptr;
+
         /* Now see if this socket has an activity timeout active.  */
-        if (tcp_activity_timeout[i])
+        if (timeout)
         {
 
             /* Decrement the activity timeout for this client request.  */
-            if (tcp_activity_timeout[i] > TCP_TIMEOUT_PERIOD)
-                tcp_activity_timeout[i] = tcp_activity_timeout[i] - TCP_TIMEOUT_PERIOD;
+            if (timeout > TCP_TIMEOUT_PERIOD)
+            	*timeout_ptr -= TCP_TIMEOUT_PERIOD;
             else
-                tcp_activity_timeout[i] =  0;
+            	*timeout_ptr =  0;
 
             /* Determine if this entry has exceeded the activity timeout.  */
-            if (tcp_activity_timeout[i] == 0)
+            if (*timeout_ptr == 0)
             {
 
                 /* Yes, the activity timeout has been exceeded.  Tear down and clean up the
@@ -754,24 +847,46 @@ int                         i;
 
                 /* Increment the activity timeout counter.  */
                 tcp_activity_timeouts++;
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+            		printf("error: socket %d activity timeout\n", i);
+                	printf("tcp_activity_timeouts: %d\n", tcp_activity_timeouts);
+				#endif
 
                 /* Now disconnect the command socket.  */
-                nx_tcp_socket_disconnect(&tcpSock[i], NX_NO_WAIT);
+                status = nx_tcp_socket_disconnect(socket, NX_NO_WAIT);
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+				if (status != NX_SUCCESS)
+				{
+					printf("tcp socket %d nx_tcp_socket_disconnect %u\n", i, status);
+				}
+				#endif
 
                 /* Unaccept the server socket.  */
-                nx_tcp_server_socket_unaccept(&tcpSock[i]);
+                status = nx_tcp_server_socket_unaccept(socket);
+				#if KEY_SERVICE_LOGGING_LEVEL >= 1
+				if (status != NX_SUCCESS)
+				{
+					printf("tcp socket %d nx_tcp_server_socket_unaccept %u\n", i, status);
+				}
+				#endif
+
+				#if KEY_SERVICE_LOGGING_LEVEL >= 2
+	            printf("Socket %d 0x%x timed out\n", i, socket);
+				#endif
 
                 /* Relisten on this socket. This will probably fail, but it is needed just in case all available
                    clients were in use at the time of the last relisten.  */
-                nx_tcp_server_socket_relisten(nxIp, gKeyServPort, &tcpSock[i]);
+                (void) nx_tcp_server_socket_relisten(nxIp, gKeyServPort, socket);
 
                 /* Update number of current open connections. */
                 if (tcp_open_connections > 0)
                     tcp_open_connections--;
+				#if KEY_SERVICE_LOGGING_LEVEL >= 3
+                	printf("tcp socket %d closed tcp_open_connections: %d\n", i, tcp_open_connections);
+				#endif
 
                 if (ssl[i] != NULL)
                 {
-                    wolfSSL_shutdown(ssl[i]);
                     wolfSSL_free(ssl[i]);
                     ssl[i] = NULL;
                 }
@@ -819,6 +934,7 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap)
         goto exit;
     }
 #ifdef HAVE_NETX
+    tcp_total_clients = tcp_clients;
     /* Extra lifting for NETX sockets */
     tcpSock = XMALLOC(sizeof(NX_TCP_SOCKET) * tcp_clients, wolfSSL_CTX_GetHeap(ctx, NULL), DYNAMIC_TYPE_TMP_BUFFER);
     if (tcpSock == NULL)
@@ -833,6 +949,14 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap)
     {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("Error: TCP activity timeout new\n");
+    #endif
+        goto exit;
+    }
+    tcp_wolfSSL_accepted = XMALLOC(sizeof(int) * tcp_clients, wolfSSL_CTX_GetHeap(ctx, NULL), DYNAMIC_TYPE_TMP_BUFFER);
+    if (tcp_wolfSSL_accepted == NULL)
+    {
+    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+        printf("Error: TCP wolfSSL accepted new\n");
     #endif
         goto exit;
     }
@@ -856,7 +980,7 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap)
     for (idx = 0; idx < tcp_clients; idx++)
     {
         ret = nx_tcp_socket_create(nxIp, &tcpSock[idx], "TCP Socket",
-                                   NX_IP_NORMAL, NX_DONT_FRAGMENT, NX_IP_TIME_TO_LIVE,
+        						   62 << 18, NX_DONT_FRAGMENT, NX_IP_TIME_TO_LIVE,
                                    TCP_WINDOW_SIZE, NX_NULL, tcp_disconnect_present);
         if (ret != 0)
         {
@@ -889,6 +1013,17 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap)
 #endif
         goto exit;
     }
+    ret = tx_timer_create(&key_server_timer, "Key Server Timer",
+    					  tcp_timeout_present, NULL,
+    					  (NX_IP_PERIODIC_RATE * TCP_TIMEOUT_PERIOD),
+    					  (NX_IP_PERIODIC_RATE * TCP_TIMEOUT_PERIOD), TX_AUTO_ACTIVATE);
+    if (ret != NX_SUCCESS)
+    {
+#if KEY_SOCKET_LOGGING_LEVEL >= 1
+        printf("Fatal error: timer create error %d\n", ret);
+#endif
+        goto exit;
+    }
 #else
     ret = KeySocket_Bind(listenfd, &gKeyServAddr,
                          gKeyServPort, 0);
@@ -910,6 +1045,9 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap)
         /* Check the return status.  */
         if (status)
         {
+		#if KEY_SERVICE_LOGGING_LEVEL >= 1
+        	printf("Error: tx_event_flags_get %u\n", status);
+		#endif
 
             /* If an error occurs, simply continue the loop.  */
             continue;
@@ -1020,7 +1158,9 @@ int KeyServer_Run(KeyServerReqPktCb reqCb, int tcp_clients, void* heap)
             }
 cleanup:
             /* closes the connections after responding */
+#ifndef HAVE_NETX
             wolfSSL_shutdown(ssl);
+#endif
             wolfSSL_free(ssl);
             ssl = NULL;
             KeySocket_Close(&connfd);
@@ -1036,7 +1176,7 @@ exit:
 
     gKeyServerRunning = 0;
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
     if (ret != 0) {
         printf("Key Server failure: %d\n", ret);
     }
@@ -1055,8 +1195,8 @@ exit:
         listenfd = &tcpSock[idx];
         KeySocket_Delete(&listenfd);
         wolfSSL_free(ssl[idx]);
-        XFREE(ssl, heap, DYNAMIC_TYPE_TMP_BUFFER);
     }
+    XFREE(ssl, heap, DYNAMIC_TYPE_TMP_BUFFER);
     XFREE(tcpSock, heap, DYNAMIC_TYPE_TMP_BUFFER);
     tcpSock = NULL;
     XFREE(tcp_activity_timeout, heap, DYNAMIC_TYPE_TMP_BUFFER);
@@ -1154,11 +1294,19 @@ int KeyServer_IsRunning(void)
 
 void KeyServer_Pause(void)
 {
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+	if (gKeyServerRunning)
+		printf("KeyServer_Pause\n");
+#endif
     gKeyServerRunning = 0;
 }
 
 void KeyServer_Resume(void)
 {
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
+	if (!gKeyServerRunning)
+		printf("KeyServer_Resume\n");
+#endif
     gKeyServerRunning = 1;
 }
 
@@ -1187,10 +1335,11 @@ static inline unsigned int KeyClient_PskCb(WOLFSSL* ignore, const char* hint,
 
     XSTRNCPY(identity, CLIENT_IDENTITY, id_max_len);
 
-    if (key_max_len > sizeof(g_TlsPsk)) {
-        key_max_len = sizeof(g_TlsPsk);
+// Hack to allow change of TLS key for demonstration of authentication failure
+    if (key_max_len > tls_pre_shared_key_length) {
+        key_max_len = tls_pre_shared_key_length;
     }
-    XMEMCPY(key, g_TlsPsk, key_max_len);
+    XMEMCPY(key, tls_pre_shared_key, key_max_len);
 
     return key_max_len;
 }
@@ -1201,19 +1350,20 @@ static inline unsigned int KeyClient_PskCb(WOLFSSL* ignore, const char* hint,
 static int KeyClient_Perform(WOLFSSL* pSsl, int type, unsigned char* msg, int* msgLen)
 {
     int ret = 0, n;
-    CmdPacket_t reqPkt;
+    CmdHeader_t reqPkt;
     CmdPacket_t respPkt;
     unsigned char* req = (unsigned char*)&reqPkt;
     unsigned char* resp = (unsigned char*)&respPkt;
     unsigned short size;
 
-    XMEMSET(&reqPkt, 0, sizeof(reqPkt));
-    reqPkt.header.version = CMD_PKT_VERSION;
-    reqPkt.header.type = type;
-    reqPkt.header.id = gPeerId;
+    reqPkt.version = CMD_PKT_VERSION;
+    reqPkt.type = type;
+    reqPkt.id = gPeerId;
+    reqPkt.size[0] = 0;
+    reqPkt.size[1] = 0;
 
     /* write request to the server */
-    if (wolfSSL_write(pSsl, req, sizeof(reqPkt.header)) != sizeof(reqPkt.header)) {
+    if (wolfSSL_write(pSsl, req, sizeof(reqPkt)) != sizeof(reqPkt)) {
         ret = wolfSSL_get_error(pSsl, 0);
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyClient_Perform: Write error %d to Server\n", ret);
@@ -1232,7 +1382,7 @@ static int KeyClient_Perform(WOLFSSL* pSsl, int type, unsigned char* msg, int* m
 
     ato16(respPkt.header.size, &size);
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
     /* show response from the server */
     printf("Response: Version %d, Cmd %d, Size %d\n",
             respPkt.header.version, respPkt.header.type, size);
@@ -1252,21 +1402,26 @@ static int KeyClient_Perform(WOLFSSL* pSsl, int type, unsigned char* msg, int* m
 }
 
 static int KeyClient_GetNet(const struct in_addr* srvAddr,
-        const struct in_addr* cliAddr,
-        int reqType, unsigned char* msg, int* msgLen, void* heap)
+							const struct in_addr* cliAddr,
+							int reqType, unsigned char* msg, int* msgLen, void* heap)
 {
     int ret;
 #ifdef HAVE_NETX
-    NX_TCP_SOCKET realSock;
-    KS_SOCKET_T sockfd = &realSock;
+    MEMORY_SECTION_BSS static NX_TCP_SOCKET realSock;
+// No need to recreate socket, if cleanup is necessary add the socket as a parameter, create the socket at initialization and delete the socket at shutdown.
+static    KS_SOCKET_T sockfd = NULL;
 #else
     #ifdef WOLFSSL_STATIC_MEMORY
         byte clientMemory[80000];
     #endif
-    KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
+static    KS_SOCKET_T sockfd = NULL;
 #endif
+
+// Unfortunately SSL cannot be reused.
+// static
     WOLFSSL* pSsl = NULL;
-    WOLFSSL_CTX* ctx = NULL;
+// No need to recreate CTX, if cleanup is necessary add the CTX as a parameter, create the CTX at initialization and delete the CTX at shutdown.
+static    WOLFSSL_CTX* ctx = NULL;
 
     (void)heap;
 
@@ -1275,98 +1430,125 @@ static int KeyClient_GetNet(const struct in_addr* srvAddr,
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
         printf("KeyClient_GetNet Error: key server port not set\n");
     #endif
-        goto exit;
+        return ret;
     }
 
+if (ctx == NULL)
+{
     /* create and initialize WOLFSSL_CTX structure for TLS 1.2 only */
-#ifndef WOLFSSL_STATIC_MEMORY
-    ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
-#else
-    ret = wolfSSL_CTX_load_static_memory(
-            &ctx, wolfTLSv1_2_client_method_ex,
-            clientMemory, sizeof(clientMemory), 0, 1);
-    if (ret != SSL_SUCCESS) {
+    #ifndef WOLFSSL_STATIC_MEMORY
+    	ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
+    #else
+    	ret = wolfSSL_CTX_load_static_memory(
+    			&ctx, wolfTLSv1_2_client_method_ex,
+    			clientMemory, sizeof(clientMemory), 0, 1);
+    	if (ret != SSL_SUCCESS) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("unable to load static memory and create ctx\n");
+    		printf("unable to load static memory and create ctx\n");
     #endif
-        goto exit;
-    }
-#endif
-
-    if (ctx == NULL) {
+    		return ret;
+    	}
+    #endif
+}
+    	if (ctx == NULL) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("wolfSSL_CTX_new error\n");
+    		printf("wolfSSL_CTX_new error\n");
     #endif
-        ret = MEMORY_E; goto exit;
-    }
+    		return MEMORY_E;
+    	}
 
-    /* set up pre shared keys */
-    wolfSSL_CTX_set_psk_client_callback(ctx, KeyClient_PskCb);
+		/* set up pre shared keys */
+		wolfSSL_CTX_set_psk_client_callback(ctx, KeyClient_PskCb);
 
-    /* create socket */
-    ret = KeySocket_CreateTcpSocket(&sockfd);
-    if (ret != 0) {
-        goto exit;
-    }
-
-    /* Bind the client address. Not done for NETX. */
-    if (cliAddr != NULL) {
-    #ifndef HAVE_NETX
-        ret = KeySocket_Bind(sockfd, cliAddr, 0, 0);
-        if (ret != 0) {
-            goto exit;
-        }
-    #endif
-    }
-
-    /* Connect to socket */
-    ret = KeySocket_Connect(sockfd, srvAddr, gKeyServPort);
-    if (ret != 0) {
-        goto exit;
-    }
-
-    /* creat wolfssl object after each tcp connct */
-    if ( (pSsl = wolfSSL_new(ctx)) == NULL) {
-    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("wolfSSL_new error\n");
-    #endif
-        ret = MEMORY_E; goto exit;
-    }
-
-    /* associate the file descriptor with the session */
+		if (sockfd == NULL) {
 #ifdef HAVE_NETX
-    wolfSSL_SetIO_NetX(pSsl, sockfd, KEY_SERVICE_RECV_TIMEOUT);
+			sockfd = &realSock;
 #else
-    ret = wolfSSL_set_fd(pSsl, sockfd);
-    if (ret != SSL_SUCCESS)
-        goto exit;
+			sockfd = KS_SOCKET_T_INIT;
+#endif
+			/* create socket */
+			ret = KeySocket_CreateTcpSocket(&sockfd);
+			if (ret != 0) {
+			#if KEY_SERVICE_LOGGING_LEVEL >= 1
+				printf("KeySocket_CreateTcpSocket error %d\n", ret);
+			#endif
+			}
+		}
+	    {
 
+#ifndef HAVE_NETX
+			/* Bind the client address. Not done for NETX. */
+			if (cliAddr != NULL) {
+				ret = KeySocket_Bind(sockfd, cliAddr, 0, 0);
+				if (ret != 0) {
+//					KeySocket_Delete(&sockfd);
+//					wolfSSL_CTX_free(ctx);
+					return ret;
+				}
+			}
 #endif
 
-    /* perform request and return response */
-    ret = KeyClient_Perform(pSsl, reqType, msg, msgLen);
-    if (ret != 0)
-        goto exit;
+			/* Connect to socket */
+			ret = KeySocket_Connect(sockfd, srvAddr, gKeyServPort);
+			if (ret != 0) {
+			#if KEY_SERVICE_LOGGING_LEVEL >= 1
+				printf("KeySocket_Connect %hhu.%hhu.%hhu.%hhu:%hu error\n",
+						BYTE3_OF(srvAddr->s_addr), BYTE2_OF(srvAddr->s_addr), BYTE1_OF(srvAddr->s_addr), BYTE0_OF(srvAddr->s_addr), gKeyServPort);
+			#endif
+			}
+			else {
 
-exit:
+			    /* creat wolfssl object after each tcp connct */
+// Unfortunately SSL cannot be reused
+//			    if (pSsl == NULL) {
+			    	pSsl = wolfSSL_new(ctx);
+//			    }
+			    if (pSsl == NULL) {
+			    #if KEY_SERVICE_LOGGING_LEVEL >= 1
+			        printf("wolfSSL_new error\n");
+			    #endif
+			        ret = MEMORY_E;
+			    }
+			    else {
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
-    if (ret != 0) {
-        printf("Key Client failure: %d\n", ret);
-    }
+					/* associate the file descriptor with the session */
+				#ifdef HAVE_NETX
+					wolfSSL_SetIO_NetX(pSsl, sockfd, KEY_SERVICE_RECV_TIMEOUT);
+				#else
+					ret = wolfSSL_set_fd(pSsl, sockfd);
+					if (ret != SSL_SUCCESS) {
+					#if KEY_SERVICE_LOGGING_LEVEL >= 1
+						printf("wolfSSL_set_fd error\n");
+					#endif
+					}
+					else
+				#endif
+					{
+						/* perform request and return response */
+						ret = KeyClient_Perform(pSsl, reqType, msg, msgLen);
+
+					#if KEY_SERVICE_LOGGING_LEVEL >= 1
+						if (ret != 0) {
+							printf("Key Client failure: %d\n", ret);
+						}
+					#endif
+
+#ifndef HAVE_NETX
+						wolfSSL_shutdown(pSsl);
 #endif
+					}
+				    /* cleanup */
+				    wolfSSL_free(pSsl);
+			    }
+				KeySocket_Close(&sockfd);
+			}
+			KeySocket_Unbind(sockfd);
+		}
+//		KeySocket_Delete(&sockfd);
 
-    wolfSSL_shutdown(pSsl);
-    KeySocket_Close(&sockfd);
-    KeySocket_Unbind(sockfd);
-    KeySocket_Delete(&sockfd);
-
-    /* cleanup */
-    wolfSSL_free(pSsl);
-
-    /* when completely done using SSL/TLS, free the
-     * wolfssl_ctx object */
-    wolfSSL_CTX_free(ctx);
+	/* when completely done using SSL/TLS, free the
+	 * wolfssl_ctx object */
+//	wolfSSL_CTX_free(ctx);
 
     return ret;
 }
@@ -1376,10 +1558,11 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 {
     int ret;
 #ifdef HAVE_NETX
-    NX_UDP_SOCKET realSock;
-    KS_SOCKET_T sockfd = (KS_SOCKET_T)&realSock;
+    MEMORY_SECTION_BSS static NX_UDP_SOCKET realSock;
+// No need to recreate socket, if cleanup is necessary add the socket as a parameter, create the socket at initialization and delete the socket at shutdown.
+static    KS_SOCKET_T sockfd = NULL;
 #else
-    KS_SOCKET_T sockfd = KS_SOCKET_T_INIT;
+static    KS_SOCKET_T sockfd = NULL;
     struct timeval to = {1, 0};
 #endif
     struct sockaddr_in clientAddr;
@@ -1393,17 +1576,24 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 #endif
     }
 
-    /* create socket */
-    ret = KeySocket_CreateUdpSocket(&sockfd);
-    if (ret != 0) {
-        goto exit;
-    }
+	if (sockfd == NULL) {
+#ifdef HAVE_NETX
+		sockfd = &realSock;
+#else
+		sockfd = KS_SOCKET_T_INIT;
+#endif
+		/* create socket */
+		ret = KeySocket_CreateUdpSocket(&sockfd);
+		if (ret != 0) {
+			goto exit;
+		}
+	}
 
 //    /* enable broadcast */
 //    KeySocket_SetBroadcast(sockfd);
 
     /* build broadcast addr */
-    XMEMSET(&clientAddr, 0, sizeof(clientAddr));
+    XMEMSET(&clientAddr.sin_zero, 0, sizeof(clientAddr.sin_zero));
     clientAddr.sin_family = AF_INET;
     clientAddr.sin_port = htons(gKeyBcastPort);
     clientAddr.sin_addr = *srvAddr;
@@ -1464,13 +1654,17 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
 
 exit:
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
     if (ret != 0) {
         printf("KeyClient_NetUdpBcast Error: %d\n", ret);
     }
 #endif
 
-    KeySocket_CloseUdp(&sockfd);
+//    KeySocket_CloseUdp(&sockfd);
+// Unbind is necessary delete is not.
+#ifdef HAVE_NETX
+	nx_udp_socket_unbind((NX_UDP_SOCKET*)sockfd);
+#endif
 
     return ret;
 }
@@ -1503,7 +1697,7 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
     /* parse response */
     ato16(pkt->header.size, &size);
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if KEY_SERVICE_LOGGING_LEVEL >= 3
     /* show response from the server */
     printf("Response: Version %d, Cmd %d, Size %d\n",
             pkt->header.version, pkt->header.type, size);
@@ -1534,12 +1728,14 @@ static int KeyClient_GetLocal(int reqType, unsigned char* msg, int* msgLen,
     unsigned char* resp;
     int n;
     CmdPacket_t* respPkt;
-    CmdPacket_t reqPkt;
+    CmdHeader_t reqPkt;
     unsigned short size;
 
-    XMEMSET(&reqPkt, 0, sizeof(reqPkt));
-    reqPkt.header.version = CMD_PKT_VERSION;
-    reqPkt.header.type = reqType;
+    reqPkt.version = CMD_PKT_VERSION;
+    reqPkt.type = reqType;
+//    reqPkt.id = 0;
+    reqPkt.size[0] = 0;
+    reqPkt.size[1] = 0;
 
     /* check request */
     ret = KeyReq_Check(&reqPkt, CMD_PKT_PRIVATE);
@@ -1647,12 +1843,10 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
 {
     int                 ret = 0;
 #ifdef HAVE_NETX
-    NX_UDP_SOCKET realListenSock, realSendSock;
+    NX_UDP_SOCKET realListenSock;
     KS_SOCKET_T listenfd = (KS_SOCKET_T)&realListenSock;
-    KS_SOCKET_T sendfd = (KS_SOCKET_T)&realSendSock;
 #else
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
-    KS_SOCKET_T sendfd = KS_SOCKET_T_INIT;
 #endif
     const unsigned long inAddrAny = INADDR_ANY;
     int n;
@@ -1678,10 +1872,6 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
     if (ret != 0) {
         goto exit;
     }
-    ret = KeySocket_CreateUdpSocket(&sendfd);
-    if (ret != 0) {
-        goto exit;
-    }
 
     /* setup socket as non-blocking */
     KeySocket_SetNonBlocking(listenfd);
@@ -1696,21 +1886,30 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
     if (ret != 0)
         goto exit;
 
+    clientAddrLen = sizeof(clientAddr);
+
     /* main loop for accepting and responding to clients */
     while (gKeyServerStop == 0) {
         /* wait for client */
-        clientAddrLen = sizeof(clientAddr);
 
-        XMEMSET(&reqPkt, 0, sizeof(CmdPacket_t));
+//        XMEMSET(&reqPkt, 0, sizeof(CmdPacket_t));
 
         /* get header */
         ret = KeySocket_RecvFrom(listenfd, (char*)&reqPkt, sizeof(CmdPacket_t),
             0, (struct sockaddr*)&clientAddr, &clientAddrLen);
         if (ret > 0) {
-        #if KEY_SERVICE_LOGGING_LEVEL >= 2
+
+            if (reqPkt.header.id == gPeerId)
+            {
+            	// IGMP loopback
+            	continue;
+            }
+
+        #if KEY_SERVICE_LOGGING_LEVEL >= 3
             unsigned char* addr = (unsigned char*)&clientAddr.sin_addr.s_addr;
             printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
         #endif
+
             /* check request */
             ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
             if (ret < 0) {
@@ -1720,12 +1919,13 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
                 continue;
             }
 
-            /* perform callback with packet */
-            if (reqCb)
-                reqCb(&reqPkt);
-
-            /* if we are key server then process incoming requests */
-            if (gKeyServerRunning) {
+            if (!gKeyServerRunning) {
+				/* perform callback with packet */
+				if (reqCb)
+					reqCb(&reqPkt);
+				}
+            else {
+            	/* if we are key server then process incoming requests */
                 unsigned char* resp = NULL;
 
                 if (reqPkt.header.type == 0) {
@@ -1760,7 +1960,7 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
 
 exit:
 
-#if KEY_SERVICE_LOGGING_LEVEL >= 2
+#if KEY_SERVICE_LOGGING_LEVEL >= 1
     if (ret != 0) {
         printf("KeyBcast_RunUdp failure: %d\n", ret);
     }
@@ -1778,17 +1978,17 @@ void KeyBcast_DefaultCb(CmdPacket_t* pkt)
     if (pkt) {
         switch (pkt->header.type) {
             case CMD_PKT_TYPE_KEY_CHG:
-                #if KEY_SERVICE_LOGGING_LEVEL >= 2
+                #if KEY_SERVICE_LOGGING_LEVEL >= 3
                     printf("Bcast Callback: New Key Available\n");
                 #endif
                 break;
             case CMD_PKT_TYPE_KEY_USE:
-                #if KEY_SERVICE_LOGGING_LEVEL >= 2
+                #if KEY_SERVICE_LOGGING_LEVEL >= 3
                     printf("Bcast Callback: Use New Key\n");
                 #endif
                 break;
             case CMD_PKT_TYPE_DISCOVER:
-                #if KEY_SERVICE_LOGGING_LEVEL >= 2
+                #if KEY_SERVICE_LOGGING_LEVEL >= 3
                     printf("Bcast Callback: Discover\n");
                 #endif
                 break;

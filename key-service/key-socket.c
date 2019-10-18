@@ -10,11 +10,16 @@
 #endif
 
 #ifdef HAVE_NETX
+    #if defined(NETX) && defined(__RX__)
+        #define MEMORY_SECTION_BSS LINK_SECTION(bss_sdram)
+    #else
+        #define MEMORY_SECTION_BSS
+    #endif
     #if KEY_SOCKET_LOGGING_LEVEL >= 1
         #define printf bsp_debug_printf
     #endif
-    NX_IP *nxIp = NULL; /* XXX This needed to be global for a bit. */
-    NX_PACKET_POOL *nxPool = NULL;
+    MEMORY_SECTION_BSS NX_IP *nxIp = NULL; /* XXX This needed to be global for a bit. */
+    MEMORY_SECTION_BSS NX_PACKET_POOL *nxPool = NULL;
 
     #ifndef KEY_SOCKET_RECVFROM_TIMEOUT
         #define KEY_SOCKET_RECVFROM_TIMEOUT 50
@@ -24,13 +29,8 @@
 int KeySocket_Init(void)
 {
 #ifdef HAVE_NETX
-    #ifdef PGB000
-        nxIp = &bsp_ip_system_bus;
-        nxPool = &bsp_pool_system_bus;
-    #else /* PGB002 */
-        nxIp = &bsp_ip_local_bus;
-        nxPool = &bsp_pool_local_bus;
-    #endif
+    nxIp = BSP_IP_POINTER;
+    nxPool = BSP_POOL_POINTER;
 #endif
     return 0;
 }
@@ -61,7 +61,7 @@ int KeySocket_CreateTcpSocket(KS_SOCKET_T* pSockfd)
     int ret = 0;
 #ifdef HAVE_NETX
     ret = nx_tcp_socket_create(nxIp, *pSockfd, (char*)"tcp_socket",
-        NX_IP_NORMAL, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, TCP_WINDOW_SIZE,
+    		62 << 18, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, TCP_WINDOW_SIZE,
         NX_NULL, NX_NULL);
 #else
     int opt = 1;
@@ -82,7 +82,7 @@ int KeySocket_CreateUdpSocket(KS_SOCKET_T* pSockfd)
     int ret = 0;
 #ifdef HAVE_NETX
     ret = nx_udp_socket_create(nxIp, (NX_UDP_SOCKET*)(*pSockfd), (char*)"udp_socket",
-        NX_IP_NORMAL, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, TCP_WINDOW_SIZE);
+    		63 << 18, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, TCP_WINDOW_SIZE);
 #else
     int opt = 1;
 
@@ -152,17 +152,20 @@ int KeySocket_Connect(KS_SOCKET_T sockfd, const struct in_addr* srvAddr, const u
         NX_WAIT_FOREVER);
     if (ret != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("nx_tcp_client_socket_bind Error %d\n", ret);
+        printf("nx_tcp_client_socket_bind Error %u\n", ret);
 #endif
         return -1;
     }
+#if KEY_SOCKET_LOGGING_LEVEL >= 3
+        printf("nx_tcp_client_socket_connect called\n");
+#endif
     ret = nx_tcp_client_socket_connect(sockfd,
         srvAddr->s_addr,
         srvPort,
         NX_WAIT_FOREVER);
     if (ret != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("nx_tcp_client_socket_connect Error %d\n", ret);
+        printf("nx_tcp_client_socket_connect Error %u\n", ret);
 #endif
         return -1;
     }
@@ -401,12 +404,12 @@ int KeySocket_Recv(KS_SOCKET_T sockFd, char *buf, int sz, int flags)
 #ifdef HAVE_NETX
     int status;
     NX_PACKET* nxPacket = NULL;
-    ULONG total, copied, left, nxOffset = 0;
+    ULONG total, copied = 0;
 
     status = nx_tcp_socket_receive(sockFd, &nxPacket, (ULONG)flags);
     if (status != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("NetX Recv receive error\n");
+        printf("NetX Recv receive error %u\n", status);
 #endif
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
@@ -415,32 +418,38 @@ int KeySocket_Recv(KS_SOCKET_T sockFd, char *buf, int sz, int flags)
         status = nx_packet_length_get(nxPacket, &total);
         if (status != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("NetX Recv length get error\n");
-#endif
-            return WOLFSSL_CBIO_ERR_GENERAL;
-        }
-
-        left = total - nxOffset;
-        status = nx_packet_data_extract_offset(nxPacket, nxOffset,
-                                               buf, sz, &copied);
-        if (status != NX_SUCCESS) {
-#if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("NetX Recv data extract offset error\n");
-#endif
-            return WOLFSSL_CBIO_ERR_GENERAL;
-        }
-
-        nxOffset += copied;
-        recvd = copied;
-
-        if (copied == left) {
-#if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("NetX Recv Drained packet\n");
+            printf("NetX Recv length get error %u\n", status);
 #endif
             nx_packet_release(nxPacket);
-            nxPacket = NULL;
-            nxOffset = 0;
+            return WOLFSSL_CBIO_ERR_GENERAL;
         }
+
+        if (total > (ULONG)sz) {
+#if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("NetX Recv length %u > buffer size %d error\n", total, sz);
+#endif
+            nx_packet_release(nxPacket);
+            return WOLFSSL_CBIO_ERR_GENERAL;
+        }
+
+        status = nx_packet_data_retrieve(nxPacket, buf, &copied);
+        if (status != NX_SUCCESS) {
+#if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("NetX Recv data extract offset error %u\n", status);
+#endif
+            return WOLFSSL_CBIO_ERR_GENERAL;
+        }
+
+        if (copied != total) {
+#if KEY_SOCKET_LOGGING_LEVEL >= 1
+            printf("NetX copied %u of %u error\n", copied, total);
+#endif
+            nx_packet_release(nxPacket);
+            return WOLFSSL_CBIO_ERR_GENERAL;
+        }
+
+        recvd = (int)copied;
+        nx_packet_release(nxPacket);
     }
 
 #else
@@ -518,13 +527,13 @@ int KeySocket_RecvFrom(KS_SOCKET_T sockFd, char *buf, int sz, int flags,
     }
 
     if (!error) {
-        ret = nx_packet_length_get(nxPacket, &rxSz);
-        if (ret != NX_SUCCESS) {
-            error = 1;
-        #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't get packet length\n");
-        #endif
-        }
+		ret = nx_packet_length_get(nxPacket, &rxSz);
+		if (ret != NX_SUCCESS) {
+			error = 1;
+		#if KEY_SOCKET_LOGGING_LEVEL >= 1
+			printf("couldn't get packet length\n");
+		#endif
+		}
     }
 
     if (!error) {
@@ -628,7 +637,7 @@ int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
     status = nx_packet_allocate(nxPool, &nxPacket, NX_TCP_PACKET, (ULONG)flags);
     if (status != NX_SUCCESS) {
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("NetX Send packet alloc error\n");
+        printf("NX Send packet alloc error\n");
 #endif
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
@@ -647,7 +656,7 @@ int KeySocket_Send(KS_SOCKET_T sockFd, const char *buf, int sz, int flags)
     if (status != NX_SUCCESS) {
         nx_packet_release(nxPacket);
 #if KEY_SOCKET_LOGGING_LEVEL >= 1
-        printf("NetX Send socket send error\n");
+        printf("NX Send socket send error %u\n", status);
 #endif
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
@@ -719,15 +728,15 @@ int KeySocket_SendTo(KS_SOCKET_T sockFd, const char *buf, int sz, int flags,
     #endif
     }
 
-    if (!error) {
-        ret = nx_packet_data_append(nxPacket, (void*)buf, sz, nxPool, NX_WAIT_FOREVER);
-        if (ret != NX_SUCCESS) {
-            error = 1;
-        #if KEY_SOCKET_LOGGING_LEVEL >= 1
-            printf("couldn't append data to packet\n");
-        #endif
-        }
-    }
+	if (!error) {
+		ret = nx_packet_data_append(nxPacket, (void*)buf, sz, nxPool, NX_WAIT_FOREVER);
+		if (ret != NX_SUCCESS) {
+			error = 1;
+		#if KEY_SOCKET_LOGGING_LEVEL >= 1
+			printf("couldn't append data to packet\n");
+		#endif
+		}
+	}
 
     if (!error) {
         ret = nx_udp_socket_send(nxSock, nxPacket,

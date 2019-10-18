@@ -44,10 +44,9 @@
 #define NO_MAIN_DRIVER
 #define BENCH_EMBEDDED
 
-#define KEY_SOCKET_LOGGING_LEVEL 3
-#define KEY_SERVICE_LOGGING_LEVEL 3
-#define WOLFCAST_LOGGING_LEVEL 3
-#define WOLFLOCAL_LOGGING_LEVEL 3
+#define KEY_SOCKET_LOGGING_LEVEL 1
+#define KEY_SERVICE_LOGGING_LEVEL 1
+#define WOLFLOCAL_LOGGING_LEVEL 1
 #if 1
 //#define DEBUG_WOLFSSL
 //#define WOLFSSL_DEBUG_MEMORY
@@ -55,16 +54,35 @@
  * calls printf() directly, and if you don't have it you'll get an error. */
 #endif
 
+#ifdef __RX__
+#define KEY_SERVICE_TCP_CLIENTS	7
+#else
+#define KEY_SERVICE_TCP_CLIENTS	99
+#endif
+
 #define WOLFSSL_MAX_MTU 512
-#define WOLFMEM_BUCKETS 64,128,256,384,512,1024,4680,29696
-#define WOLFMEM_DIST 14,4,6,8,4,2,4,1
+#define WOLFMEM_BUCKETS 64,128,256,384,512,1024,4680,29716
+/* #define WOLFMEM_DIST 14,4,6,8,4,2,4,1 - original list */
+/* #define WOLFMEM_DIST (7*2),(2*2),(3*2),(4*2),(2*2),(1*2),(2*2),1
+ * - original list scaled */
+#define WOLFMEM_DIST	(7 * KEY_SERVICE_TCP_CLIENTS), \
+						(2 * KEY_SERVICE_TCP_CLIENTS), \
+						(3 * KEY_SERVICE_TCP_CLIENTS), \
+						(4 * KEY_SERVICE_TCP_CLIENTS), \
+						(2 * KEY_SERVICE_TCP_CLIENTS), \
+						(1 * KEY_SERVICE_TCP_CLIENTS), \
+						(2 * KEY_SERVICE_TCP_CLIENTS), \
+						1
 #define WOLFMEM_MAX_BUCKETS 8
 /* The static memory size is based on the above constants, and calculated
  * by the function wolfSSL_StaticBufferSz(). */
-//#define WOLFLOCAL_STATIC_MEMORY_SZ 30000
-#define WOLFLOCAL_STATIC_MEMORY_SZ 3000000
+/* #define WOLFLOCAL_STATIC_MEMORY_SZ 30000 - original value */
+/* #define WOLFLOCAL_STATIC_MEMORY_SZ (15000*2) - original value scaled */
+#define WOLFLOCAL_STATIC_MEMORY_SZ ((15000*KEY_SERVICE_TCP_CLIENTS)+29716)
+/* The 29716 is there to cover the single 29696 block, plus some padding
+ * for the bucket overhead. */
 
-#define KEY_SOCKET_RECVFROM_TIMEOUT 300
+#define KEY_SOCKET_RECVFROM_TIMEOUT 50
 
 int mySeed(unsigned char*, unsigned int);
 #define CUSTOM_RAND_GENERATE_SEED(p, sz) mySeed(p, sz)
