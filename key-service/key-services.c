@@ -66,6 +66,7 @@ static THREAD_LOCAL int            gKeyServerRunning = 0;
 static THREAD_LOCAL int            gKeyServerStop = 0;
        THREAD_LOCAL unsigned short gKeyServerEpoch;
 static THREAD_LOCAL struct in_addr gKeyServAddr;
+static THREAD_LOCAL struct in_addr gGroupAddr;
        THREAD_LOCAL unsigned char  gPeerId = 0;
 static THREAD_LOCAL unsigned short gKeyServPort;
 static THREAD_LOCAL unsigned short gKeyBcastPort;
@@ -1112,8 +1113,6 @@ int KeyServer_GenNewKey(void* heap)
 
     return ret;
 }
-
-extern const struct in_addr gGroupAddr;
 
 int KeyServer_NewKeyUse(void* heap)
 {
