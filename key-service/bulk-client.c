@@ -93,7 +93,7 @@ static void *TimerWorker(void* arg)
 }
 
 
-static void KeyBcastCallback(CmdPacket_t* pkt)
+static void KeyMcastCallback(CmdPacket_t* pkt)
 {
     if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
         /* trigger key change */
@@ -282,7 +282,7 @@ static void* KeyClientWorker(void* arg)
 
 int main(int argc, char* argv[])
 {
-    tinfo_t blInfo; /* Broadcast listener thread info */
+    tinfo_t mlInfo; /* Multicast listener thread info */
     pthread_t *kcPids = NULL; /* Key Client thread PIDs */
     tinfo_t *kcInfos = NULL; /* Key Client thread infos */
     tinfo_t *ti;
@@ -316,7 +316,7 @@ int main(int argc, char* argv[])
 
     memset(&gInfo.srvAddr, 0, sizeof(gInfo.srvAddr));
     memset(&gInfo.mcastAddr, 0, sizeof(gInfo.mcastAddr));
-    memset(&blInfo, 0, sizeof(blInfo));
+    memset(&mlInfo, 0, sizeof(mlInfo));
     memset(kcPids, 0, sizeof(pthread_t)*tCount);
     memset(kcInfos, 0, sizeof(tinfo_t)*tCount);
 
@@ -332,12 +332,12 @@ int main(int argc, char* argv[])
         goto exit;
     }
 
-    /* Set up the broadcast listener address. */
-    blInfo.idx = -1;
+    /* Set up the multicast listener address. */
+    mlInfo.idx = -1;
     sprintf(ipAddr, "%s.1", gNetworkBase);
-    inet_pton(AF_INET, ipAddr, &blInfo.addr.sin_addr);
-    blInfo.addr.sin_family = AF_INET;
-    blInfo.addr.sin_port = 0;
+    inet_pton(AF_INET, ipAddr, &mlInfo.addr.sin_addr);
+    mlInfo.addr.sin_family = AF_INET;
+    mlInfo.addr.sin_port = 0;
 
     inet_pton(AF_INET, gMcastAddr, &gInfo.mcastAddr.sin_addr);
     gInfo.mcastAddr.sin_family = AF_INET;
@@ -348,7 +348,7 @@ int main(int argc, char* argv[])
     gInfo.srvAddr.sin_family = AF_INET;
     gInfo.srvAddr.sin_port = htons(12345);
 
-    /* This is the init for the local key broadcast listener. It should
+    /* This is the init for the local key multicast listener. It should
      * be using a different peer ID than any of the key clients or the
      * key server. */
     KeyServices_Init(102, 22222, 11111);
@@ -373,9 +373,9 @@ int main(int argc, char* argv[])
     if (status != 0)
         XLOG(1, "0: thread TIMER failed (%d)\n", status);
 
-    status = KeyBcast_RunUdp(&gInfo.mcastAddr.sin_addr, KeyBcastCallback, NULL);
+    status = KeyMcast_RunUdp(&gInfo.mcastAddr.sin_addr, KeyMcastCallback, NULL);
     if (status != 0) {
-        XLOG(1, "KeyBcast failed %d\n", status);
+        XLOG(1, "KeyMcast failed %d\n", status);
         goto exit;
     }
 

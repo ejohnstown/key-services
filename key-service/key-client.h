@@ -5,7 +5,7 @@
 #include "key-socket.h"
 
 /* API's */
-void KeyServices_Init(unsigned char peerId, unsigned short bcastPort, unsigned short servPort);
+void KeyServices_Init(unsigned char peerId, unsigned short mcastPort, unsigned short servPort);
 
 int KeyClient_Get(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
 int KeyClient_GetUdp(const struct in_addr* srvAddr, int reqType, unsigned char* msg, int* msgLen, void* heap);
@@ -15,10 +15,10 @@ int KeyClient_GetKey_ex(const struct in_addr* srvAddr, const struct in_addr* cli
 int KeyClient_FindMaster(struct in_addr* srvAddr, void* heap);
 int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* epochResp, void* heap);
 
-/* Un-secure UDP broadcast listening service */
-typedef void (*KeyBcastReqPktCb)(CmdPacket_t* pkt);
-int KeyBcast_RunUdp(const struct in_addr* srvAddr, KeyBcastReqPktCb respCb, void* heap);
+/* Un-secure UDP multicast listening service */
+typedef void (*KeyMcastReqPktCb)(CmdPacket_t* pkt);
+int KeyMcast_RunUdp(const struct in_addr* srvAddr, KeyMcastReqPktCb respCb, void* heap);
 
-void KeyBcast_DefaultCb(CmdPacket_t* pkt);
+void KeyMcast_DefaultCb(CmdPacket_t* pkt);
 
 #endif

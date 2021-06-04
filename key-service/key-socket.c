@@ -247,20 +247,6 @@ int KeySocket_SetNonBlocking(KS_SOCKET_T sockFd)
     return ret;
 }
 
-int KeySocket_SetBroadcast(KS_SOCKET_T sockFd)
-{
-    int ret = 0;
-#ifdef NETX
-    (void)sockFd;
-    /* Broacast depends on address, not option. */
-#else
-    int opt = 1;
-    ret = KeySocket_SetSockOpt(sockFd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
-#endif
-
-    return ret;
-}
-
 int KeySocket_Listen(KS_SOCKET_T sockFd, unsigned short listenPort, int listenMaxQueue)
 {
     int ret;

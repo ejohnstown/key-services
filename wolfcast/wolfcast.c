@@ -824,7 +824,7 @@ WolfcastServer(wolfWrapper_t *wrapper)
 #define GROUP_PORT 12345
 
 
-    static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+    static void KeyMcastReqPktCallback(CmdPacket_t* pkt)
     {
         if (pkt) {
             if (pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
@@ -853,21 +853,21 @@ WolfcastServer(wolfWrapper_t *wrapper)
         }
     }
 
-    static void* KeyBcastThread(void* arg)
+    static void* KeyMcastThread(void* arg)
     {
         int ret;
         struct in_addr srvAddr;
-        unsigned char addr[4] = {KEY_BCAST_ADDR};
+        unsigned char addr[4] = {KEY_MCAST_ADDR};
 
         (void)arg;
 
         XMEMCPY(&srvAddr.s_addr, addr, sizeof(srvAddr.s_addr));
 
-        ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, NULL);
+        ret = KeyMcast_RunUdp(&srvAddr, KeyMcastReqPktCallback, NULL);
 
         if (ret) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
-            WCPRINTF("error: KeyBcast_RunUdp returned %d\n", ret);
+            WCPRINTF("error: KeyMcast_RunUdp returned %d\n", ret);
 #endif
         }
 
@@ -960,7 +960,7 @@ static void* WolfCastServerThread(void* arg)
 
 static void FetchNewKey(void)
 {
-    unsigned char addr[4] = {KEY_BCAST_ADDR};
+    unsigned char addr[4] = {KEY_MCAST_ADDR};
     struct in_addr keySrvAddr;
     KeyRespPacket_t keyState;
     int ret;
@@ -1124,12 +1124,12 @@ main(
         int i;
         pthread_t tid;
 
-        /* spin up the thread for UDP broadcast */
-        error = pthread_create(&tid, NULL, KeyBcastThread, NULL) != 0;
+        /* spin up the thread for UDP multicast */
+        error = pthread_create(&tid, NULL, KeyMcastThread, NULL) != 0;
 
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
-            WCERR("couldn't create KeyBcastThread");
+            WCERR("couldn't create KeyMcastThread");
 #endif
         }
 
@@ -1138,7 +1138,7 @@ main(
 
         if (error) {
 #if WOLFCAST_LOGGING_LEVEL >= 1
-            WCERR("couldn't detach KeyBcastThread");
+            WCERR("couldn't detach KeyMcastThread");
 #endif
         }
 

@@ -69,7 +69,7 @@ static THREAD_LOCAL struct in_addr gKeyServAddr;
 static THREAD_LOCAL struct in_addr gGroupAddr;
        THREAD_LOCAL unsigned char  gPeerId = 0;
 static THREAD_LOCAL unsigned short gKeyServPort;
-static THREAD_LOCAL unsigned short gKeyBcastPort;
+static THREAD_LOCAL unsigned short gKeyMcastPort;
 #ifndef NO_KEY_SERVER
     static THREAD_LOCAL unsigned int   gAuthFailCount = 0;
 #endif
@@ -105,7 +105,7 @@ static const int gRespPrivacy[CMD_PKT_TYPE_COUNT] = {
     CMD_PKT_PRIVATE,/* CMD_PKT_TYPE_KEY_NEW */
 };
 
-static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
+static int KeyClient_NetUdpMcast(const struct in_addr* srvAddr, int txMsgLen,
     unsigned char* txMsg, int* rxMsgLen, unsigned char* rxMsg);
 
 #ifndef NO_KEY_SERVER
@@ -1122,7 +1122,7 @@ int KeyServer_NewKeyUse(void* heap)
 
     if (ret == 0) {
         struct in_addr groupAddr = gGroupAddr;
-        ret = KeyClient_NetUdpBcast(&groupAddr,
+        ret = KeyClient_NetUdpMcast(&groupAddr,
             gRespPktLen[CMD_PKT_TYPE_KEY_USE],
             (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_USE], 0, NULL);
     }
@@ -1138,7 +1138,7 @@ int KeyServer_NewKeyChange(void* heap)
 
     if (ret == 0) {
         struct in_addr groupAddr = gGroupAddr;
-        ret = KeyClient_NetUdpBcast(&groupAddr,
+        ret = KeyClient_NetUdpMcast(&groupAddr,
             gRespPktLen[CMD_PKT_TYPE_KEY_CHG],
             (unsigned char*)gRespPkt[CMD_PKT_TYPE_KEY_CHG], 0, NULL);
     }
@@ -1370,7 +1370,7 @@ exit:
     return ret;
 }
 
-static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
+static int KeyClient_NetUdpMcast(const struct in_addr* srvAddr, int txMsgLen,
     unsigned char* txMsg, int* rxMsgLen, unsigned char* rxMsg)
 {
     int ret;
@@ -1385,10 +1385,10 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     socklen_t clientAddrLen = sizeof(clientAddr);
     int n;
 
-    if (gKeyBcastPort == 0) {
+    if (gKeyMcastPort == 0) {
         ret = -1;
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("KeyClient_NetUdpBcast Error: broadcast port not set\n");
+        printf("KeyClient_NetUdpMcast Error: multicast port not set\n");
 #endif
     }
 
@@ -1398,13 +1398,13 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
         goto exit;
     }
 
-//    /* enable broadcast */
-//    KeySocket_SetBroadcast(sockfd);
+//    /* enable multicast */
+//    KeySocket_SetMulticast(sockfd);
 
-    /* build broadcast addr */
+    /* build multicast addr */
     XMEMSET(&clientAddr, 0, sizeof(clientAddr));
     clientAddr.sin_family = AF_INET;
-    clientAddr.sin_port = htons(gKeyBcastPort);
+    clientAddr.sin_port = htons(gKeyMcastPort);
     clientAddr.sin_addr = *srvAddr;
 #ifndef HAVE_NETX
     ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr,
@@ -1419,25 +1419,14 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
     if (ret != 0) {
         goto exit;
     }
-
-//    /* Derive and set broadcast address. */
-//    ret = nx_ip_address_get(nxIp, &addr, &mask);
-//    if (ret != NX_SUCCESS) {
-//    #if KEY_SERVICE_LOGGING_LEVEL >= 1
-//        printf("KeyClient_NetUdpBcast Error: ip address get %d\n", ret);
-//    #endif
-//        ret = -1;
-//        goto exit;
-//    }
-//    clientAddr.sin_addr.s_addr = addr | ~mask;
 #endif
 
-    /* send broadcast */
+    /* send multicast */
     ret = KeySocket_SendTo(sockfd, (char*)txMsg, txMsgLen, 0,
         (struct sockaddr*)&clientAddr, sizeof(clientAddr));
     if (ret != txMsgLen) {
     #if KEY_SERVICE_LOGGING_LEVEL >= 1
-        printf("KeyClient_NetUdpBcast Error: KeySocket_SendTo %d\n", ret);
+        printf("KeyClient_NetUdpMcast Error: KeySocket_SendTo %d\n", ret);
     #endif
         ret = -1;
         goto exit;
@@ -1451,7 +1440,7 @@ static int KeyClient_NetUdpBcast(const struct in_addr* srvAddr, int txMsgLen,
         if (n <= 0) {
             ret = n;
         #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyClient_NetUdpBcast: Response error or timeout! %d!\n", ret);
+            printf("KeyClient_NetUdpMcast: Response error or timeout! %d!\n", ret);
         #endif
             goto exit;
         }
@@ -1465,7 +1454,7 @@ exit:
 
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
     if (ret != 0) {
-        printf("KeyClient_NetUdpBcast Error: %d\n", ret);
+        printf("KeyClient_NetUdpMcast Error: %d\n", ret);
     }
 #endif
 
@@ -1492,7 +1481,7 @@ static int KeyClient_GetNetUdp(const struct in_addr* srvAddr, int reqType,
 
     rxLen = sizeof(CmdHeader_t) + *msgLen;
     /* send request and get msg */
-    ret = KeyClient_NetUdpBcast(srvAddr,
+    ret = KeyClient_NetUdpMcast(srvAddr,
         sizeof(CmdHeader_t), (unsigned char*)pkt,
         &rxLen, (unsigned char*)pkt);
     if (ret < 0) {
@@ -1631,18 +1620,18 @@ int KeyClient_NewKeyRequest(const struct in_addr* srvAddr, EpochRespPacket_t* ep
 }
 
 void KeyServices_Init(unsigned char peerId,
-                      unsigned short bcastPort, unsigned short servPort)
+                      unsigned short mcastPort, unsigned short servPort)
 {
     /* Port numbers are used by both the clients and servers. */
     gPeerId = peerId;
-    gKeyBcastPort = bcastPort;
+    gKeyMcastPort = mcastPort;
     gKeyServPort = servPort;
 }
 
 
 
 
-int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, void* heap)
+int KeyMcast_RunUdp(const struct in_addr* mcastAddr, KeyMcastReqPktCb reqCb, void* heap)
 {
     int                 ret = 0;
 #ifdef HAVE_NETX
@@ -1661,10 +1650,10 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
 
     (void)heap;
 
-    if (gKeyBcastPort == 0) {
+    if (gKeyMcastPort == 0) {
         ret = -1;
 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyBcast_RunUdp Error: broadcast port not set\n");
+            printf("KeyMcast_RunUdp Error: multicast port not set\n");
 #endif
         goto exit;
     }
@@ -1686,7 +1675,7 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
     KeySocket_SetNonBlocking(listenfd);
 
     /* setup socket listener */
-    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyBcastPort, 1);
+    ret = KeySocket_Bind(listenfd, (const struct in_addr*)&inAddrAny, gKeyMcastPort, 1);
     if (ret != 0)
         goto exit;
 
@@ -1708,13 +1697,13 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
         if (ret > 0) {
         #if KEY_SERVICE_LOGGING_LEVEL >= 2
             unsigned char* addr = (unsigned char*)&clientAddr.sin_addr.s_addr;
-            printf("Recieved Bcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
+            printf("Recieved Mcast from: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
         #endif
             /* check request */
             ret = KeyReq_Check(&reqPkt, CMD_PKT_PUBLIC);
             if (ret < 0) {
             #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                printf("KeyBcast_RunUdp Error: KeyReq_Check failed %d\n", ret);
+                printf("KeyMcast_RunUdp Error: KeyReq_Check failed %d\n", ret);
             #endif
                 continue;
             }
@@ -1740,7 +1729,7 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
                     (struct sockaddr*)&clientAddr, clientAddrLen);
                 if (ret != n) {
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("KeyBcast_RunUdp Error: SendTo %d\n", ret);
+                    printf("KeyMcast_RunUdp Error: SendTo %d\n", ret);
                 #endif
                 }
             }
@@ -1752,7 +1741,7 @@ int KeyBcast_RunUdp(const struct in_addr* mcastAddr, KeyBcastReqPktCb reqCb, voi
         }
         else if (ret < 0) {
         #if KEY_SERVICE_LOGGING_LEVEL >= 1
-            printf("KeyBcast_RunUdp Error: RecvFrom %d\n", ret);
+            printf("KeyMcast_RunUdp Error: RecvFrom %d\n", ret);
         #endif
         }
     }
@@ -1761,39 +1750,39 @@ exit:
 
 #if KEY_SERVICE_LOGGING_LEVEL >= 2
     if (ret != 0) {
-        printf("KeyBcast_RunUdp failure: %d\n", ret);
+        printf("KeyMcast_RunUdp failure: %d\n", ret);
     }
 #endif
 
-    KeySocket_Unlisten(gKeyBcastPort);
+    KeySocket_Unlisten(gKeyMcastPort);
     KeySocket_Close(&listenfd);
     KeySocket_Delete(&listenfd);
 
     return ret;
 }
 
-void KeyBcast_DefaultCb(CmdPacket_t* pkt)
+void KeyMcast_DefaultCb(CmdPacket_t* pkt)
 {
     if (pkt) {
         switch (pkt->header.type) {
             case CMD_PKT_TYPE_KEY_CHG:
                 #if KEY_SERVICE_LOGGING_LEVEL >= 2
-                    printf("Bcast Callback: New Key Available\n");
+                    printf("Mcast Callback: New Key Available\n");
                 #endif
                 break;
             case CMD_PKT_TYPE_KEY_USE:
                 #if KEY_SERVICE_LOGGING_LEVEL >= 2
-                    printf("Bcast Callback: Use New Key\n");
+                    printf("Mcast Callback: Use New Key\n");
                 #endif
                 break;
             case CMD_PKT_TYPE_DISCOVER:
                 #if KEY_SERVICE_LOGGING_LEVEL >= 2
-                    printf("Bcast Callback: Discover\n");
+                    printf("Mcast Callback: Discover\n");
                 #endif
                 break;
             default:
                 #if KEY_SERVICE_LOGGING_LEVEL >= 1
-                    printf("Bcast Callback: Unsupported packet type %u\n",
+                    printf("Mcast Callback: Unsupported packet type %u\n",
                         pkt->header.type);
                 #endif
                 break;

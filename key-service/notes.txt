@@ -2,12 +2,12 @@
  * NOTE: The following isn't true. It is the plan.
  *
  * $ bulk-client ipaddr nclients startaddr timeout
- *    ipaddr    - IP address of the broadcast listener
+ *    ipaddr    - IP address of the multicast listener
  *    nclients  - number of clients to run
  *    startaddr - IP address for the first client
  *    timeout   - timeout for the transmit trigger in ms
  *
- * Binds the broadcast listener to ipaddr.
+ * Binds the multicast listener to ipaddr.
  *
  * Starts up nclients threads running acting like multicast clients. Each
  * needs its own IP address. The addresses used are startaddr counting up.

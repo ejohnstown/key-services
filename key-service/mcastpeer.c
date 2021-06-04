@@ -20,7 +20,7 @@
 /* configration */
 #define KEY_SERVER_IP       IP_ADDRESS(127,0,0,1)
 #define KEY_SERVER_PORT     11111
-#define KEY_BCAST_PORT      22222
+#define KEY_MCAST_PORT      22222
 #define GROUP_ADDR          IP_ADDRESS(226,0,0,3)
 #define GROUP_PORT          12345
 #define MSG_SIZE            sizeof(KeyRespPacket_t)
@@ -168,10 +168,10 @@ static void* PeerThread(void* arg)
 
     gettimeofday(&start, NULL);
 
-    /* set the broadcast address */
+    /* set the multicast address */
     gKeySrvAddr.s_addr = -1;
 
-    /* find master using UDP broadcast message */
+    /* find master using UDP multicast message */
     ret = KeyClient_FindMaster(&gKeySrvAddr, heap);
     if (ret != 0) {
         printf("unable to find master %d\n", ret);
@@ -380,7 +380,7 @@ static void* KeyServerThread(void* arg)
     return NULL;
 }
 
-static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+static void KeyMcastReqPktCallback(CmdPacket_t* pkt)
 {
     if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
         /* trigger key change */
@@ -393,12 +393,12 @@ static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
     }
 }
 
-static void* KeyBcastUdpThread(void* arg)
+static void* KeyMcastUdpThread(void* arg)
 {
     void* heap = arg;
     struct in_addr srvAddr = {-1};
 
-    KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
+    KeyMcast_RunUdp(&srvAddr, KeyMcastReqPktCallback, heap);
 
     return NULL;
 }
@@ -409,9 +409,9 @@ static int KeyServerStart(pthread_t* tid, pthread_t* tid_udp)
 
     KeyServer_Resume();
     /* start key server on UDP */
-    ret = pthread_create(tid_udp, NULL, KeyBcastUdpThread, NULL);
+    ret = pthread_create(tid_udp, NULL, KeyMcastUdpThread, NULL);
     if (ret < 0) {
-        perror("key broadcast UDP pthread_create failed");
+        perror("key multicast UDP pthread_create failed");
         return ret;
     }
 
@@ -524,7 +524,7 @@ int main(int argc, char** argv)
 
     {
         struct in_addr ipaddr = { .s_addr = KEY_SERVER_IP };
-        KeyServices_Init(0, KEY_BCAST_PORT, KEY_SERVER_PORT);
+        KeyServices_Init(0, KEY_MCAST_PORT, KEY_SERVER_PORT);
         ret = KeyServer_Init(heap, &ipaddr);
     }
     if (ret != 0) {

@@ -6,7 +6,7 @@ static struct in_addr gMyAddr;
 static struct in_addr gKeySrvAddr;
 static unsigned short gCurEpoch = 0;
 
-#define KEY_BCAST_PORT 22222
+#define KEY_MCAST_PORT 22222
 #define KEY_SERV_PORT 11111
 
 #define KEY_SERVICE_CLIENT_TIMEOUT (1 * KEY_SERVICE_TICKS_PER_SECOND)
@@ -15,7 +15,7 @@ static unsigned short gCurEpoch = 0;
 #ifndef NETX
     #include <pthread.h>
 
-    static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+    static void KeyMcastReqPktCallback(CmdPacket_t* pkt)
     {
         if (pkt && pkt->header.type == CMD_PKT_TYPE_KEY_CHG) {
             /* trigger key change */
@@ -43,13 +43,13 @@ static unsigned short gCurEpoch = 0;
         }
     }
 
-    static void* KeyBcastThread(void* arg)
+    static void* KeyMcastThread(void* arg)
     {
         int ret;
         void* heap = arg;
         struct in_addr srvAddr = {-1};
 
-        ret = KeyBcast_RunUdp(&srvAddr, KeyBcastReqPktCallback, heap);
+        ret = KeyMcast_RunUdp(&srvAddr, KeyMcastReqPktCallback, heap);
 
         return (void*)((size_t)ret);
     }
@@ -97,7 +97,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    KeyServices_Init(myId, KEY_BCAST_PORT, KEY_SERV_PORT);
+    KeyServices_Init(myId, KEY_MCAST_PORT, KEY_SERV_PORT);
     ret = KeyServer_Init(heap, &gMyAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
@@ -106,8 +106,8 @@ int main(int argc, char **argv)
     }
 
 #ifndef NETX
-    /* spin up another thread for UDP broadcast */
-    ret = pthread_create(&tid, NULL, KeyBcastThread, heap);
+    /* spin up another thread for UDP multicast */
+    ret = pthread_create(&tid, NULL, KeyMcastThread, heap);
     if (ret < 0) {
         printf("Pthread create failed for UDP\n");
         goto exit;

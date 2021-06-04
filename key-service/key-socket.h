@@ -102,7 +102,6 @@ int  KeySocket_CreateTcpSocket(KS_SOCKET_T* pSockfd);
 int  KeySocket_CreateUdpSocket(KS_SOCKET_T* pSockfd);
 int  KeySocket_SetIpMembership(KS_SOCKET_T sockFd, const struct in_addr* multiaddr, const struct in_addr* ifcaddr);
 int  KeySocket_SetNonBlocking(KS_SOCKET_T sockFd);
-int  KeySocket_SetBroadcast(KS_SOCKET_T sockFd);
 int  KeySocket_Connect(KS_SOCKET_T sockfd, const struct in_addr* srvAddr, const unsigned short srvPort);
 int  KeySocket_Select(KS_SOCKET_T sockFd, int timeoutMs);
 int  KeySocket_Bind(KS_SOCKET_T sockFd, const struct in_addr* listenAddr, const unsigned short listenPort, int isUdp);

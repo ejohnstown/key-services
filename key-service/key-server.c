@@ -3,18 +3,18 @@
 #include "key-client.h"
 #include "key-server.h"
 
-#define KEY_BCAST_PORT 22222
+#define KEY_MCAST_PORT 22222
 #define KEY_SERV_PORT 11111
 
 
 typedef struct params_t {
     struct in_addr myAddr;
-    struct in_addr bcastAddr;
+    struct in_addr mcastAddr;
     void* heap;
 } params_t;
 
 
-static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
+static void KeyMcastReqPktCallback(CmdPacket_t* pkt)
 {
     if (pkt && pkt->header.type == CMD_PKT_TYPE_DISCOVER) {
         printf("Discovery packet.\n");
@@ -22,13 +22,13 @@ static void KeyBcastReqPktCallback(CmdPacket_t* pkt)
 }
 
 
-static void* KeyBcastThread(void* arg)
+static void* KeyMcastThread(void* arg)
 {
     params_t* params = (params_t*)arg;
     int ret;
 
-    ret = KeyBcast_RunUdp(&params->bcastAddr,
-                          KeyBcastReqPktCallback,
+    ret = KeyMcast_RunUdp(&params->mcastAddr,
+                          KeyMcastReqPktCallback,
                           params->heap);
 
     return (void*)((size_t)ret);
@@ -40,7 +40,7 @@ static void* RekeyThread(void* arg)
     void* heap = ((params_t*)arg)->heap;
     int ret;
 
-    KeyServices_Init(101, KEY_BCAST_PORT, KEY_SERV_PORT);
+    KeyServices_Init(101, KEY_MCAST_PORT, KEY_SERV_PORT);
     ret = KeyServer_Init(heap, &((params_t*)arg)->myAddr);
     while (1) {
         sleep(30);
@@ -102,7 +102,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    ret = inet_pton(AF_INET, argv[2], &params.bcastAddr);
+    ret = inet_pton(AF_INET, argv[2], &params.mcastAddr);
     if (ret != 1) {
         printf("Error: the IP address \'%s\' isn't parsable.\n", argv[2]);
         goto exit;
@@ -116,7 +116,7 @@ int main(int argc, char **argv)
         goto exit;
     }
 
-    KeyServices_Init(102, KEY_BCAST_PORT, KEY_SERV_PORT);
+    KeyServices_Init(102, KEY_MCAST_PORT, KEY_SERV_PORT);
     ret = KeyServer_Init(params.heap, &params.myAddr);
     if (ret != 0) {
         printf("Error: KeyServer_Init\n");
@@ -125,8 +125,8 @@ int main(int argc, char **argv)
     }
 
 #if 0
-    /* spin up another thread for UDP broadcast */
-    ret = pthread_create(&tid, NULL, KeyBcastThread, &params);
+    /* spin up another thread for UDP multicast */
+    ret = pthread_create(&tid, NULL, KeyMcastThread, &params);
     if (ret < 0) {
         printf("Pthread create failed for UDP\n");
         goto exit;
