@@ -1035,7 +1035,7 @@ main(
     unsigned short myId = 0;
     unsigned short peerIdList[PEER_ID_LIST_SZ];
     unsigned int peerIdListSz = 0;
-    struct in_addr keySrvAddr = { .s_addr = inet_addr("192.168.20.1") };
+    struct in_addr keySrvAddr = { .s_addr = inet_addr("192.168.0.8") };
 
     if (argc == 3 || argc == 4) {
         long n;
@@ -1141,7 +1141,7 @@ main(
             WCERR("couldn't detach KeyMcastThread");
 #endif
         }
-
+#if 0
         /* spin up the thread three stream threads */
         for (i = 0; i < 1; i++) {
             struct in_addr groupAddr;
@@ -1175,13 +1175,14 @@ main(
                 break;
             }
         }
+#endif
     }
 
     if (!error) {
         for(;;) {
+            sleep(1);
             if (gRekeyTrigger)
                 FetchNewKey();
-            sleep(1);
         }
     }
 

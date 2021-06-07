@@ -1405,7 +1405,7 @@ static int KeyClient_NetUdpMcast(const struct in_addr* srvAddr, int txMsgLen,
     XMEMSET(&clientAddr, 0, sizeof(clientAddr));
     clientAddr.sin_family = AF_INET;
     clientAddr.sin_port = htons(gKeyMcastPort);
-    clientAddr.sin_addr = *srvAddr;
+    clientAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 #ifndef HAVE_NETX
     ret = KeySocket_Bind(sockfd, (const struct in_addr*)&clientAddr.sin_addr,
         0, 1);
@@ -1420,6 +1420,7 @@ static int KeyClient_NetUdpMcast(const struct in_addr* srvAddr, int txMsgLen,
         goto exit;
     }
 #endif
+    clientAddr.sin_addr = *srvAddr;
 
     /* send multicast */
     ret = KeySocket_SendTo(sockfd, (char*)txMsg, txMsgLen, 0,
@@ -1640,7 +1641,6 @@ int KeyMcast_RunUdp(const struct in_addr* mcastAddr, KeyMcastReqPktCb reqCb, voi
     KS_SOCKET_T sendfd = (KS_SOCKET_T)&realSendSock;
 #else
     KS_SOCKET_T listenfd = KS_SOCKET_T_INIT;
-    KS_SOCKET_T sendfd = KS_SOCKET_T_INIT;
 #endif
     const unsigned long inAddrAny = INADDR_ANY;
     int n;
@@ -1663,10 +1663,6 @@ int KeyMcast_RunUdp(const struct in_addr* mcastAddr, KeyMcastReqPktCb reqCb, voi
 
     /* create sockets */
     ret = KeySocket_CreateUdpSocket(&listenfd);
-    if (ret != 0) {
-        goto exit;
-    }
-    ret = KeySocket_CreateUdpSocket(&sendfd);
     if (ret != 0) {
         goto exit;
     }
