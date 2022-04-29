@@ -1660,6 +1660,7 @@ int KeyMcast_RunUdp(const struct in_addr* mcastAddr, KeyMcastReqPktCb reqCb, voi
 
     /* copy address to global for key change */
     //XMEMCPY(&gKeyServAddr, srvAddr, sizeof(struct in_addr));
+    KeyServer_Resume();
 
     /* create sockets */
     ret = KeySocket_CreateUdpSocket(&listenfd);

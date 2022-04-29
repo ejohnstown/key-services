@@ -1120,7 +1120,7 @@ main(
     }
 
     /* Start up the threads */
-    if (!error) {
+    if (!error && !isClient) {
         int i;
         pthread_t tid;
 
@@ -1182,7 +1182,8 @@ main(
         for(;;) {
             sleep(1);
             if (gRekeyTrigger)
-                FetchNewKey();
+                if (isClient)
+                    FetchNewKey();
         }
     }
 
